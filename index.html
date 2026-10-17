@@ -430,12 +430,35 @@
       if (!longos.length) nums.filter(v => v.length >= 7).forEach(v => {
         chips.forEach(cp => {
           const d = cp[0];
-          for (let i = 0; i + v.length <= d.length; i++) {
+          let feito = false;
+          for (let i = 0; i + v.length <= d.length && !feito; i++) {   // 1 número trocado
             let dif = 0; for (let j = 0; j < v.length && dif < 2; j++) if (d[i + j] !== v[j]) dif++;
-            if (dif < 2) { const t = d.substr(i, v.length); if (parecidos.indexOf(t) < 0) parecidos.push(t); break; }
+            if (dif < 2) { const t = d.substr(i, v.length); if (parecidos.indexOf(t) < 0) parecidos.push(t); feito = true; }
+          }
+          if (!feito && v.length >= 8) for (let j = 0; j < v.length && !feito; j++) {   // 1 número a mais lido
+            const w = v.slice(0, j) + v.slice(j + 1); if (d.indexOf(w) >= 0) { if (parecidos.indexOf(w) < 0) parecidos.push(w); feito = true; }
           }
         });
       });
+      // ainda nada: soma as várias leituras (o número aparece repetido na faixa) e vê qual chip combina mais com todas
+      if (!longos.length && !parecidos.length) {
+        const leit = nums.filter(v => v.length >= 7 && v.length <= 12).slice(0, 10);
+        if (leit.length >= 2) {
+          let top = null, topN = 0, seg = 0;
+          chips.forEach(cp => {
+            const d = cp[0], notas = []; let jan = '', melhorL = -1;
+            leit.forEach(v => { let mb = 0, mi = 0;
+              for (let i = 0; i + v.length <= d.length; i++) { let n = 0; for (let j = 0; j < v.length; j++) if (d[i + j] === v[j]) n++; if (n > mb) { mb = n; mi = i; } }
+              const nt = mb / v.length; notas.push(nt); if (nt > melhorL) { melhorL = nt; jan = d.substr(mi, v.length); } });
+            notas.sort((x, y) => y - x);
+            const soma = notas.slice(0, 3).reduce((x, y) => x + y, 0);   // as 3 leituras que mais combinam
+            if (soma > topN) { seg = topN; topN = soma; top = jan; } else if (soma > seg) seg = soma;
+          });
+          // só aceita se combina bem (>= 70% dos números) e bem mais que o segundo chip
+          const nL = Math.min(3, leit.length);
+          if (top && topN / nL >= 0.7 && topN - seg >= 0.08 * nL) parecidos.push(top);
+        }
+      }
       // ordem: leituras longas exatas, depois parecidas, depois pedaços curtos
       achados = longos.concat(parecidos.filter(v => longos.indexOf(v) < 0), achados.filter(v => v.length < 7));
     }
@@ -495,35 +518,72 @@
       const bw = x1-x0+1, bh = y1-y0+1, asp = bw/bh;
       if (n < 12 || n > N*0.15 || asp < 0.4 || asp > 2.5) continue;
       const cx = sx/n, cy = sy/n, rp = Math.max(bw, bh)/2;
-      // raios a partir do pino: do escuro para o amarelo e até onde o amarelo termina
-      const pts = []; let comAm = 0;
+      // raios a partir do pino: anota TODOS os pontos onde o amarelo é interrompido (borda do chip, números, brinco encostado)
+      const raios = [], dentro = []; let comAm = 0;
       for (let k = 0; k < 48; k++) {
-        const a = k*Math.PI/24, ca = Math.cos(a), sa = Math.sin(a);
+        const a = k*Math.PI/24, ca = Math.cos(a), sa = Math.sin(a), paradas = [];
         let t = rp;
         while (t < rp*3 && !ehAm(Math.round(cx+ca*t), Math.round(cy+sa*t))) t++;
-        if (t >= rp*3) continue;
-        comAm++;
+        if (t >= rp*3) { raios.push({ ca, sa, p: [] }); continue; }
+        comAm++; dentro.push([cx + ca*t, cy + sa*t]);   // onde o anel preto do pino termina
         let fora = 0, ultimo = t;
-        // aceita buracos (números impressos e o anel escuro do pino) de até ~18% da distância
-        while (t < lim) { if (ehAm(Math.round(cx+ca*t), Math.round(cy+sa*t))) { fora = 0; ultimo = t; } else if (++fora > Math.max(4, t*0.18)) break; t++; }
-        pts.push([cx + ca*ultimo, cy + sa*ultimo]);
+        while (t < lim) {
+          if (ehAm(Math.round(cx+ca*t), Math.round(cy+sa*t))) { if (fora >= 2) paradas.push(ultimo); fora = 0; ultimo = t; }
+          else if (++fora > Math.max(4, t*0.18)) break;
+          t++;
+        }
+        paradas.push(ultimo);
+        raios.push({ ca, sa, p: paradas.filter(d => d > rp * 1.3) });
       }
-      if (comAm < 34 || pts.length < 20) continue;
-      // RANSAC: testa várias elipses com 6 pontos e fica com a que mais pontos concordam (ignora raios que fugiram)
-      let el = null, melhor = 0, sem = 12345 + i0;
+      if (comAm < 34) continue;
+      // elipse centrada no pino: u'Qu = 1 com Q = [A B; B C]; testa trios de pontos (1 por raio) e fica com a que mais raios concordam
+      const cand = []; raios.forEach((r, i) => r.p.forEach(d => cand.push([i, r.ca * d, r.sa * d])));
+      if (cand.length < 12) continue;
+      const resolve3 = (P) => {   // A x² + 2B xy + C y² = 1
+        const M = P.map(([, x, y]) => [x*x, 2*x*y, y*y, 1]);
+        for (let c = 0; c < 3; c++) { let p = c; for (let r = c+1; r < 3; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r; [M[c], M[p]] = [M[p], M[c]];
+          if (Math.abs(M[c][c]) < 1e-12) return null;
+          for (let r = 0; r < 3; r++) if (r !== c) { const f = M[r][c]/M[c][c]; for (let k2 = c; k2 < 4; k2++) M[r][k2] -= f*M[c][k2]; } }
+        const A = M[0][3]/M[0][0], B = M[1][3]/M[1][1], C = M[2][3]/M[2][2];
+        if (A <= 0 || C <= 0 || A*C - B*B <= 0) return null;
+        return [A, B, C];
+      };
+      const dQ = (Q, x, y) => Math.sqrt(Q[0]*x*x + 2*Q[1]*x*y + Q[2]*y*y);
+      let melhorQ = null, melhorN = 0, melhorTam = 0, sem = 12345 + i0;
       const rnd = () => { sem = (sem * 1103515245 + 12345) & 0x7fffffff; return sem / 0x7fffffff; };
-      for (let it = 0; it < 120; it++) {
-        const amostra = []; while (amostra.length < 6) { const p = pts[Math.floor(rnd() * pts.length)]; if (amostra.indexOf(p) < 0) amostra.push(p); }
-        const e = ajustarElipse(amostra); if (!e || e.b / e.a < 0.45) continue;
-        const nIn = pts.filter(p => Math.abs(distElipse(e, p) - 1) < 0.07).length;
-        if (nIn > melhor) { melhor = nIn; el = e; }
+      for (let it = 0; it < 300; it++) {
+        const P = []; const usados = new Set();
+        while (P.length < 3) { const c = cand[Math.floor(rnd() * cand.length)]; if (usados.has(c[0])) continue; usados.add(c[0]); P.push(c); if (usados.size >= raios.length) break; }
+        if (P.length < 3) break;
+        const Q = resolve3(P); if (!Q) continue;
+        const tr = Q[0] + Q[2], dt = Q[0]*Q[2] - Q[1]*Q[1], ds = Math.sqrt(Math.max(0, tr*tr/4 - dt));
+        const ea = 1 / Math.sqrt(tr/2 - ds), eb = 1 / Math.sqrt(tr/2 + ds);
+        if (eb / ea < 0.45 || eb < rp * 1.3) continue;
+        let nIn = 0; raios.forEach(r => { if (r.p.some(d => Math.abs(dQ(Q, r.ca*d, r.sa*d) - 1) < 0.06)) nIn++; });
+        const tam = ea * eb;
+        if (nIn > melhorN + 1 || (nIn >= melhorN - 1 && tam > melhorTam * 1.25 && nIn >= 26)) { melhorN = nIn; melhorQ = Q; melhorTam = tam; }
       }
-      if (!el) continue;
-      for (let volta = 0; volta < 2; volta++) {
-        const bons = pts.filter(p => Math.abs(distElipse(el, p) - 1) < 0.07);
-        const novo = bons.length >= 8 ? ajustarElipse(bons) : null; if (novo && novo.b / novo.a >= 0.45) el = novo;
+      if (!melhorQ || melhorN < 22) continue;
+      // pontos que concordam e ajuste final livre (deixa o centro andar um pouco: foto inclinada)
+      const pts = [];
+      raios.forEach(r => { let m = null, md = 1; r.p.forEach(d => { const e = Math.abs(dQ(melhorQ, r.ca*d, r.sa*d) - 1); if (e < 0.06 && e < md) { md = e; m = d; } }); if (m) pts.push([cx + r.ca*m, cy + r.sa*m]); });
+      let el = ajustarElipse(pts);
+      if (!el || el.b / el.a < 0.45 || Math.hypot(el.x - cx, el.y - cy) > el.b * 0.3) {
+        // usa a centrada no pino
+        const q11 = melhorQ[0], q12 = melhorQ[1], q22 = melhorQ[2], tr = q11 + q22, dt = q11*q22 - q12*q12, ds = Math.sqrt(Math.max(0, tr*tr/4 - dt));
+        const l1 = tr/2 + ds, l2 = tr/2 - ds, th = 0.5 * Math.atan2(2*q12, q11 - q22), c = Math.cos(th), s = Math.sin(th);
+        const e1 = q11*c*c + 2*q12*c*s + q22*s*s, k1 = 1 / Math.sqrt(e1), k2 = 1 / Math.sqrt(tr - e1);
+        el = { x: cx, y: cy, a: 1 / Math.sqrt(l2), b: 1 / Math.sqrt(l1), m: [k1*c*c + k2*s*s, (k1 - k2)*c*s, k1*s*s + k2*c*c], Q: melhorQ };
       }
-      const inl = pts.filter(p => Math.abs(distElipse(el, p) - 1) < 0.08).length / 48;
+      const inl = melhorN / 48;
+      // elipse de dentro (anel preto do pino): o número fica entre ela e a borda; ajuda quando a foto é inclinada
+      let interno = null;
+      if (dentro.length >= 12) {
+        const dd = dentro.map(p => Math.hypot(p[0]-cx, p[1]-cy)).sort((a, b) => a - b), med = dd[dd.length >> 1];
+        const ok = dentro.filter(p => Math.abs(Math.hypot(p[0]-cx, p[1]-cy) - med) < med * 0.2);
+        const ei = ok.length >= 10 ? ajustarElipse(ok) : null;
+        if (ei && ei.b / ei.a > 0.4 && Math.sqrt(ei.a*ei.b) < Math.sqrt(el.a*el.b) * 0.8 && Math.sqrt(ei.a*ei.b) > Math.sqrt(el.a*el.b) * 0.2) interno = { x: ei.x, y: ei.y, m: ei.m };
+      }
       if (el.b / el.a < 0.45 || el.b < rp * 1.3 || Math.hypot(el.x - cx, el.y - cy) > el.b * 0.45) continue;
       // confere: anel de fora tem que ser quase todo amarelo e o meio tem que ter o pino escuro
       let am = 0, tot = 0, esc = 0, totC = 0;
@@ -534,7 +594,7 @@
       }
       const fAm = am / tot, fEsc = esc / totC;
       if (fAm < 0.5) continue;
-      achados.push({ x: el.x, y: el.y, r: Math.sqrt(el.a*el.b), m: el.m, a: el.a, b: el.b, nota: (comAm/48) * inl * fAm * (fEsc > 0.3 ? 1 : 0.6) });
+      achados.push({ x: el.x, y: el.y, r: Math.sqrt(el.a*el.b), m: el.m, a: el.a, b: el.b, interno: interno, nota: (comAm/48) * inl * fAm * (fEsc > 0.3 ? 1 : 0.6) });
     }
     achados.sort((p, q) => q.nota - p.nota);
     // se um achado está dentro de outro bem maior (ex.: anel amarelo do pino), fica o maior
@@ -579,7 +639,7 @@
           const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
           const cx = cv.getContext('2d'); cx.drawImage(im, 0, 0, W, H);
           ok(acharChips(cx.getImageData(0, 0, W, H).data, W, H).filter(c => c.nota >= 0.25).slice(0, 3)
-            .map(c => ({ x: c.x / k, y: c.y / k, r: c.r / k, m: c.m.map(v => v / k) })));
+            .map(c => ({ x: c.x / k, y: c.y / k, r: c.r / k, m: c.m.map(v => v / k), interno: c.interno ? { x: c.interno.x / k, y: c.interno.y / k, m: c.interno.m.map(v => v / k) } : null })));
         } catch (e) { ok([]); }
       };
       im.onerror = () => ok([]);
@@ -756,16 +816,19 @@
     finally { if (psm) await w.setParameters({ tessedit_pageseg_mode: '6' }); }
   }
   // chip: lê primeiro no celular; se não bater com nenhum chip e tiver internet, pede ao Google também
+  let falhaLeitor = '';   // motivo da última falha (aparece na tela para ajudar a corrigir)
   async function lerNumerosChip(faixa) {
-    let cands = [];
-    try { cands = await ocrLocal(faixa); } catch (e) {}
+    let cands = [], f1 = '', f2 = '';
+    try { cands = await ocrLocal(faixa); } catch (e) { f1 = 'celular: ' + (e && e.message || e); }
     const bate = l => l.some(v => v.length >= MIN_CHIP && buscarLocal(v, 'chip').length);
-    if (bate(cands) || navigator.onLine === false) return { candidatos: cands };
+    if (bate(cands) || navigator.onLine === false) { falhaLeitor = f1; return { candidatos: cands }; }
     try {
       const r = await lerFoto(faixa.split(',')[1]);
-      if (r.erro && !cands.length) return r;
-      return { candidatos: (r.candidatos || []).concat(cands) };
-    } catch (e) { if (cands.length) return { candidatos: cands }; throw e; }
+      if (r.erro) f2 = 'Google: ' + r.erro;
+      cands = (r.candidatos || []).concat(cands);
+    } catch (e) { f2 = 'Google: ' + (e && e.message || e); }
+    falhaLeitor = [f1, f2].filter(Boolean).join(' | ');
+    return { candidatos: cands };
   }
   // já deixa o leitor baixado para funcionar depois sem internet
   setTimeout(() => { if (navigator.onLine !== false) carregarOCR().catch(() => {}); }, 5000);
@@ -799,7 +862,7 @@
       res.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   }
-  // "desenrola" o anel do chip numa faixa reta (o número fica em linha para o OCR ler)
+  // "desenrola" o anel do chip numa faixa reta (o número fica em linha para o leitor)
   function desenrolarChip(img, c) {
     return new Promise((ok, falha) => {
       const im = new Image();
@@ -814,24 +877,51 @@
           const g = (xx, yy) => { const i = (yy * W0 + xx) * 4; return 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]; };
           return (g(x0, y0) * (1 - fx) + g(x0 + 1, y0) * fx) * (1 - fy) + (g(x0, y0 + 1) * (1 - fx) + g(x0 + 1, y0 + 1) * fx) * fy;
         };
-        const R = c.r, M = c.m || [c.r, 0, c.r], faixas = [[0.5, 1.0, false], [0.4, 0.9, false], [0.55, 1.05, false], [0.5, 1.0, true]];
-        const k = Math.max(1, 70 / (0.5 * R));            // altura mínima de 70 px por faixa
-        const H = Math.round(0.5 * R * k), W = Math.min(3000, Math.round(2 * Math.PI * 0.78 * R * k * 2));   // 2 voltas
+        const R = c.r, M0 = c.m || [c.r, 0, c.r];
+        const vet = (M, a) => { const sx = Math.sin(a), sy = -Math.cos(a); return [M[0]*sx + M[1]*sy, M[1]*sx + M[2]*sy]; };
+        // claridade da face amarela do chip
+        const amostra = [];
+        for (let i = 0; i < 72; i++) { const [vx, vy] = vet(M0, i / 72 * 2 * Math.PI); for (const f of [0.6, 0.7, 0.8, 0.9]) amostra.push(cinza(c.x + vx*f, c.y + vy*f)); }
+        amostra.sort((a, b) => a - b);
+        const lim = amostra[Math.floor(amostra.length * 0.6)] * 0.62;
+        // ajuste fino: procura o centro/tamanho em que a faixa do número cai inteira na face amarela
+        // (sem entrar no anel preto do pino nem sair do chip) — corrige foto inclinada e borda aparecendo de lado
+        const nota = (ox, oy, e) => { let n = 0;
+          for (let i = 0; i < 120; i++) { const [vx, vy] = vet(M0, i / 120 * 2 * Math.PI);
+            for (const f of [0.5, 0.55, 0.92, 0.96]) if (cinza(c.x + ox + vx*f*e, c.y + oy + vy*f*e) > lim) n++; }
+          return n; };
+        let best = { ox: 0, oy: 0, e: 1, n: nota(0, 0, 1) };
+        for (const passo of [0.06, 0.03, 0.015]) {
+          const base = best;
+          for (const dx of [-1, 0, 1]) for (const dy of [-1, 0, 1]) for (const de of [-1, 0, 1]) {
+            if (!dx && !dy && !de) continue;
+            const ox = base.ox + dx * passo * R, oy = base.oy + dy * passo * R, e = base.e * (1 + de * passo);
+            const n = nota(ox, oy, e); if (n > best.n) best = { ox, oy, e, n };
+          }
+        }
+        const C = { x: c.x + best.ox, y: c.y + best.oy }, M = M0.map(v => v * best.e);
+        const faixas = [[0.5, 1.0, false], [0.4, 0.9, false], [0.55, 1.05, false], [0.5, 1.0, true]];
+        const k = 80 / (0.5 * R);
+        const H = 80, W = Math.min(2400, Math.round(2 * Math.PI * 0.78 * R * k * 2));   // 2 voltas
         const gap = 24, out = document.createElement('canvas');
         out.width = W; out.height = faixas.length * (H + gap) + gap;
         const ctx = out.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, out.width, out.height);
         faixas.forEach((f, n) => {
           const vals = new Float32Array(W * H);
           for (let x = 0; x < W; x++) {
-            const a = (x / W) * 4 * Math.PI;
-            const sa = Math.sin(a), ca = Math.cos(a);
+            const a = (x / W) * 4 * Math.PI + (f[2] ? Math.PI : 0), [vx, vy] = vet(M, a);
             for (let y = 0; y < H; y++) {
-              const t = y / (H - 1), r = f[2] ? R * (f[0] + (f[1] - f[0]) * t) : R * (f[1] - (f[1] - f[0]) * t);
-              const sx = f[2] ? -sa : sa, sy = f[2] ? ca : -ca;
-              const fr = r / R;
-              vals[y * W + x] = cinza(c.x + fr * (M[0] * sx + M[1] * sy), c.y + fr * (M[1] * sx + M[2] * sy));
+              const t = y / (H - 1), fr = f[2] ? f[0] + (f[1] - f[0]) * t : f[1] - (f[1] - f[0]) * t;
+              vals[y * W + x] = cinza(C.x + vx * fr, C.y + vy * fr);
             }
           }
+          // tira pelos/riscos finos (mediana 3x3) sem borrar os números
+          const liso = new Float32Array(W * H), jan = new Float32Array(9);
+          for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+            let n = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const yy = Math.min(H - 1, Math.max(0, y + dy)), xx = Math.min(W - 1, Math.max(0, x + dx)); jan[n++] = vals[yy * W + xx]; }
+            jan.sort(); liso[y * W + x] = jan[4];
+          }
+          vals.set(liso);
           const ord = Array.from(vals).sort((p, q) => p - q);
           const lo = ord[Math.floor(ord.length * 0.02)], hi = ord[Math.floor(ord.length * 0.98)] || 255, d = Math.max(1, hi - lo);
           const dados = ctx.createImageData(W, H);
@@ -841,7 +931,7 @@
           }
           ctx.putImageData(dados, 0, gap + n * (H + gap));
         });
-        ok(out.toDataURL('image/jpeg', 0.92));
+        ok(out.toDataURL('image/jpeg', 0.85));
       };
       im.onerror = () => falha(new Error('foto'));
       im.src = img;
@@ -852,7 +942,7 @@
     teclado.classList.add('oculto');
     let img;
     try { img = await reduzirFoto(arq); } catch (e) { exibir('<div class="msg erro">Não consegui abrir a foto.</div>'); return; }
-    const modoFoto = modo, g = geracao;
+    const modoFoto = modo, g = geracao; falhaLeitor = '';
     $('foto').disabled = true;
     try {
       let c = { numero: '', outros: [] };
@@ -864,22 +954,11 @@
         // tenta cada redondo achado até o número bater com um chip
         for (let n = 0; n < lista.length && !achou(c.numero); n++) {
           $('res').innerHTML = bannerFoto({ img: img }, 'Lendo o número do chip…');
-          const r = await lerNumerosChip(await desenrolarChip(img, lista[n]));
+          let r = { candidatos: [] };
+          try { r = await lerNumerosChip(await desenrolarChip(img, lista[n])); } catch (e) { falhaLeitor = String(e && e.message || e); }
           if (g !== geracao) return;
           const e = escolherNumero(r.candidatos || [], 'chip');
           if (achou(e.numero) || (!c.numero && e.numero)) c = e;
-        }
-        if (!achou(c.numero)) {   // não deu sozinho: marca na mão
-          $('foto').disabled = false;
-          const m = await marcarChip(img, lista.length ? 'Não consegui ler o chip direito. Marque ele na foto:' : 'Não achei o chip redondo sozinho. Marque ele na foto:');
-          if (g !== geracao) return;
-          if (!m) { $('res').innerHTML = ''; return; }
-          $('res').innerHTML = bannerFoto({ img: img }, 'Lendo o número do chip…');
-          $('foto').disabled = true;
-          const r = await lerNumerosChip(await desenrolarChip(img, m));
-          if (g !== geracao) return;
-          if (r.erro && !(r.candidatos || []).length) { exibir(bannerFoto({ img: img }, esc(r.erro))); return; }
-          c = escolherNumero(r.candidatos || [], 'chip');
         }
       } else {
         $('res').innerHTML = bannerFoto({ img: img }, 'Lendo o número do brinco…');
@@ -894,7 +973,15 @@
           if (achou(e.numero) || !c.numero) c = e;
         }
       }
-      if (!c.numero) { exibir(bannerFoto({ img: img }, (modoFoto === 'chip' ? 'Não consegui ler o número do chip redondo.<br>Tente de novo marcando bem o centro e a borda do chip, ou digite o número.' : 'Não encontrei o número do brinco na foto.<br>Tire mais perto, com o brinco reto e com boa luz.'))); return; }
+      if (!achou(c.numero)) {   // não achou: pede para digitar (mostra sugestões, se houver)
+        const qual = modoFoto === 'chip' ? 'chip' : 'brinco';
+        const sug = (c.outros || []).filter(v => achou(v));
+        exibir(bannerFoto({ img: img }, 'Não consegui ler o número do ' + qual + ' nesta foto.<br><b style="font-size:16px">Digite o número no teclado</b> ou tire outra foto mais de perto.'
+          + (sug.length ? '<div class="outros">' + sug.map(v => '<button type="button" data-outro="' + esc(v) + '">' + esc(v) + '</button>').join('') + '</div>' : '')
+          + (falhaLeitor ? '<br><small>(' + esc(falhaLeitor) + ')</small>' : '')));
+        mostrarTeclado();
+        return;
+      }
       termoEl.value = c.numero; novo = false;
       fotoLida = { img: img, numero: c.numero, outros: c.outros, modo: modoFoto };
       $('btn').click();
@@ -911,7 +998,7 @@
   window.addEventListener('online', () => atualizar(false, true));
 
   // ---- atualização automática do app (troque APP_VERSAO e versao.json a cada mudança) ----
-  const APP_VERSAO = '15';
+  const APP_VERSAO = '17';
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
       const checar = () => reg.update().catch(() => {});
