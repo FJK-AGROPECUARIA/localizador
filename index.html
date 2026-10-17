@@ -125,13 +125,13 @@
     <div class="teclado" id="teclado">
       <div class="grade num" id="gradeNum">
         <button type="button" data-k="1">1</button><button type="button" data-k="2">2</button><button type="button" data-k="3">3</button><button type="button" data-k="4">4</button><button type="button" data-k="5">5</button><button type="button" data-k="6">6</button><button type="button" data-k="7">7</button><button type="button" data-k="8">8</button><button type="button" data-k="9">9</button>
-        <button type="button" class="acao" data-k="C">Limpar</button><button type="button" data-k="0">0</button><button type="button" class="acao" data-k="ABC">ABC</button>
+        <button type="button" class="acao" data-k="LIMPAR">Limpar</button><button type="button" data-k="0">0</button><button type="button" class="acao" data-k="ABC">ABC</button>
       </div>
       <div class="grade letras oculto" id="gradeLetras">
         <button type="button" data-k="Q">Q</button><button type="button" data-k="W">W</button><button type="button" data-k="E">E</button><button type="button" data-k="R">R</button><button type="button" data-k="T">T</button><button type="button" data-k="Y">Y</button><button type="button" data-k="U">U</button><button type="button" data-k="I">I</button><button type="button" data-k="O">O</button><button type="button" data-k="P">P</button>
         <button type="button" data-k="A">A</button><button type="button" data-k="S">S</button><button type="button" data-k="D">D</button><button type="button" data-k="F">F</button><button type="button" data-k="G">G</button><button type="button" data-k="H">H</button><button type="button" data-k="J">J</button><button type="button" data-k="K">K</button><button type="button" data-k="L">L</button><button type="button" data-k="-">-</button>
         <button type="button" data-k="Z">Z</button><button type="button" data-k="X">X</button><button type="button" data-k="C">C</button><button type="button" data-k="V">V</button><button type="button" data-k="B">B</button><button type="button" data-k="N">N</button><button type="button" data-k="M">M</button><button type="button" data-k="." >.</button><button type="button" data-k="/">/</button><button type="button" data-k=" " >&#9251;</button>
-        <button type="button" class="acao l3" data-k="123">123</button><button type="button" class="acao l4" data-k="C">Limpar</button><button type="button" class="acao l3" data-k="B">&#9003;</button>
+        <button type="button" class="acao l3" data-k="123">123</button><button type="button" class="acao l4" data-k="LIMPAR">Limpar</button><button type="button" class="acao l3" data-k="APAGAR">&#9003;</button>
       </div>
     </div>
     <button id="btn" type="submit">Buscar</button>
@@ -184,15 +184,26 @@
   function apagar() { termoEl.value = novo ? '' : termoEl.value.slice(0, -1); novo = false; }
   termoEl.addEventListener('click', mostrarTeclado);
   $('apagar').addEventListener('click', () => { apagar(); mostrarTeclado(); });
-  $('limpar').addEventListener('click', () => { termoEl.value = ''; novo = false; mostrarTeclado(); });
+  // Limpar: zera tudo e volta ao começo (campo, resultado, foto e Brinco marcado)
+  let geracao = 0;
+  function limparTudo() {
+    geracao++;
+    termoEl.value = ''; novo = false; fotoLida = null;
+    $('res').innerHTML = '';
+    $('btn').disabled = false; $('foto').disabled = false;
+    fundoMenu.classList.add('oculto');
+    marcarModo('brinco'); usarLetras(false); mostrarTeclado();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  $('limpar').addEventListener('click', limparTudo);
   termoEl.addEventListener('input', () => { termoEl.value = termoEl.value.toUpperCase(); novo = false; });
   teclado.addEventListener('click', ev => {
     const bt = ev.target.closest('button'); if (!bt) return;
     const k = bt.dataset.k; if (!k) return;
     if (k === 'ABC') { usarLetras(true); return; }
     if (k === '123') { usarLetras(false); return; }
-    if (k === 'C') { termoEl.value = ''; novo = false; return; }
-    if (k === 'B') { apagar(); return; }
+    if (k === 'LIMPAR') { limparTudo(); return; }
+    if (k === 'APAGAR') { apagar(); return; }
     termoEl.value = (novo ? '' : termoEl.value) + k;
     novo = false;
     termoEl.scrollLeft = termoEl.scrollWidth;
@@ -352,10 +363,12 @@
     }
     // 2) não achou no celular (ou sem dados salvos): consulta o AgroHub ao vivo
     $('btn').disabled = true;
+    const g = geracao;
     $('res').innerHTML = '<div class="msg">Buscando no AgroHub…</div>';
     const termoApi = modo === 'chip' ? soNumeros(termo) : termo, modoBusca = modo;
     api({ acao: 'buscar', termo: termoApi })
       .then(txt => {
+        if (g !== geracao) return;
         const r = JSON.parse(txt);
         if (r.erro) { exibir('<div class="msg erro">' + esc(r.erro) + '</div>'); return; }
         let h = '';
@@ -365,7 +378,7 @@
         if (r.falhas && r.falhas.length) h += '<div class="msg erro">Não consegui consultar: ' + esc(r.falhas.join(', ')) + '</div>';
         exibir(h);
       })
-      .catch(e => exibir('<div class="msg erro">Sem conexão com o AgroHub. ' + esc(e.message || e) + '</div>'))
+      .catch(e => g === geracao && exibir('<div class="msg erro">Sem conexão com o AgroHub. ' + esc(e.message || e) + '</div>'))
       .finally(() => { $('btn').disabled = false; });
   });
 
@@ -592,13 +605,15 @@
     if (navigator.onLine === false) { exibir('<div class="msg erro">Ler o número pela foto precisa de internet. Digite o número no teclado.</div>'); return; }
     let img;
     try { img = await reduzirFoto(arq); } catch (e) { exibir('<div class="msg erro">Não consegui abrir a foto.</div>'); return; }
-    const modoFoto = modo;
+    const modoFoto = modo, g = geracao;
     let envio = img, auto = false;
     if (modoFoto === 'chip') {
       $('res').innerHTML = bannerFoto({ img: img }, 'Procurando o chip redondo na foto…');
       let c = await detectarChip(img);
+      if (g !== geracao) return;
       auto = !!c;
       if (!c) c = await marcarChip(img, 'Não achei o chip redondo sozinho. Marque ele na foto:');
+      if (g !== geracao) return;
       if (!c) { $('res').innerHTML = ''; return; }
       try { envio = await desenrolarChip(img, c); } catch (e) { envio = img; }
     }
@@ -606,16 +621,19 @@
     $('foto').disabled = true;
     try {
       let r = await lerFoto(envio.split(',')[1]);
+      if (g !== geracao) return;
       if (r.erro) { exibir(bannerFoto({ img: img }, esc(r.erro)) ); return; }
       let c = escolherNumero(r.candidatos || [], modoFoto);
       // achou o redondo sozinho mas o número não bateu com nenhum chip: deixa marcar na mão e tenta de novo
       if (modoFoto === 'chip' && auto && !buscarLocal(c.numero || '', 'chip').length) {
         $('foto').disabled = false;
         const m = await marcarChip(img, 'Não consegui ler o chip direito. Marque ele na foto:');
+        if (g !== geracao) return;
         if (!m) { $('res').innerHTML = ''; return; }
         $('res').innerHTML = bannerFoto({ img: img }, 'Lendo o número do chip…');
         $('foto').disabled = true;
         r = await lerFoto((await desenrolarChip(img, m)).split(',')[1]);
+        if (g !== geracao) return;
         if (r.erro) { exibir(bannerFoto({ img: img }, esc(r.erro)) ); return; }
         c = escolherNumero(r.candidatos || [], modoFoto);
       }
@@ -624,6 +642,7 @@
       fotoLida = { img: img, numero: c.numero, outros: c.outros, modo: modoFoto };
       $('btn').click();
     } catch (e) {
+      if (g !== geracao) return;
       exibir(bannerFoto({ img: img }, 'Sem conexão para ler a foto. ' + esc(e.message || e)));
     } finally { $('foto').disabled = false; }
   }
@@ -635,7 +654,7 @@
   window.addEventListener('online', () => atualizar(false, true));
 
   // ---- atualização automática do app (troque APP_VERSAO e versao.json a cada mudança) ----
-  const APP_VERSAO = '12';
+  const APP_VERSAO = '13';
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
       const checar = () => reg.update().catch(() => {});
