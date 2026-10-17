@@ -35,7 +35,13 @@
   .msg { margin-top:16px; padding:14px; border-radius:10px; background:#fff; border:1px solid var(--borda); text-align:center; color:var(--cinza); }
   .erro { color:#b3261e; border-color:#f1c4c0; background:#fdf1f0; }
   .campo-busca { position:relative; }
-  .campo-busca input { padding-right:162px; font-size:20px; }
+  .campo-busca input { padding-right:112px; font-size:20px; }
+  .topo-busca { display:flex; align-items:center; gap:10px; margin:4px 0 10px; }
+  .modo { flex:1; display:flex; background:#fff; border:1px solid var(--borda); border-radius:12px; padding:4px; gap:4px; }
+  .modo button { flex:1; width:auto; font-size:18px; padding:10px 0; border-radius:9px; background:transparent; color:var(--cinza); font-weight:700; touch-action:manipulation; }
+  .modo button.ativo { background:var(--verde); color:#fff; }
+  .foto-topo { width:58px; flex:none; padding:0; height:52px; border-radius:12px; background:var(--lima); color:var(--verde); display:flex; align-items:center; justify-content:center; touch-action:manipulation; }
+  .foto-topo svg { width:26px; height:26px; }
   .acoes-campo { position:absolute; right:8px; top:50%; transform:translateY(-50%); display:flex; gap:6px; }
   .acoes-campo button { width:auto; padding:9px 12px; font-size:15px; border-radius:8px; background:var(--verde2); color:var(--verde); border:1px solid var(--lima); touch-action:manipulation; }
   .acoes-campo .icone { font-size:20px; padding:5px 0; width:44px; text-align:center; }
@@ -87,13 +93,18 @@
   </div>
   <form id="f" autocomplete="off">
     <div class="campo">
-      <label for="termo" class="rotulo">Brinco ou chip</label>
+      <div class="topo-busca">
+        <div class="modo" role="group" aria-label="Buscar por">
+          <button type="button" class="ativo" data-modo="brinco" aria-pressed="true">Brinco</button>
+          <button type="button" data-modo="chip" aria-pressed="false">Chip</button>
+        </div>
+        <button type="button" class="foto-topo" id="foto" aria-label="Foto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg></button>
+      </div>
       <div class="campo-busca">
-        <input id="termo" inputmode="none" placeholder="Ex.: 11491" autocomplete="off" autocorrect="off" spellcheck="false">
+        <input id="termo" inputmode="none" placeholder="Nº do brinco. Ex.: 11491" autocomplete="off" autocorrect="off" spellcheck="false">
         <input type="file" id="fotoCamera" accept="image/*" capture="environment" hidden>
-        <input type="file" id="fotoGaleria" accept="image/*" hidden>
+        <input type="file" id="fotoGaleria" accept="image/jpeg,image/png,image/heic,image/heif,image/webp" hidden>
         <div class="acoes-campo">
-          <button type="button" class="icone foto" id="foto" aria-label="Foto do brinco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg></button>
           <button type="button" class="icone" id="apagar" aria-label="Apagar">&#9003;</button>
           <button type="button" class="icone" id="limpar" aria-label="Limpar">&#10005;</button>
         </div>
@@ -117,9 +128,9 @@
 </main>
   <div class="fundo-menu oculto" id="fundoMenu">
     <div class="menu-foto" role="dialog" aria-label="Foto do brinco">
-      <h2>Foto do brinco</h2>
+      <h2 id="tituloFoto">Foto do brinco</h2>
       <button type="button" data-fonte="fotoCamera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>Tirar foto</button>
-      <button type="button" class="galeria" data-fonte="fotoGaleria"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>Galeria</button>
+      <button type="button" class="galeria" data-fonte="fotoGaleria"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>Escolher foto</button>
       <button type="button" class="cancelar" data-fonte="">Cancelar</button>
     </div>
   </div>
@@ -141,6 +152,18 @@
   const termoEl = $('termo'), teclado = $('teclado');
   const gradeNum = $('gradeNum'), gradeLetras = $('gradeLetras');
   let novo = false;
+  let modo = 'brinco';   // 'brinco' ou 'chip' (sempre um dos dois marcado)
+  const PLACE = { brinco: 'Nº do brinco. Ex.: 11491', chip: 'Nº do chip (mín. 5 números)' };
+  function marcarModo(m) {
+    modo = m;
+    document.querySelectorAll('.modo button').forEach(b => { const on = b.dataset.modo === m; b.classList.toggle('ativo', on); b.setAttribute('aria-pressed', on); });
+    termoEl.placeholder = PLACE[m];
+    if (m === 'chip') usarLetras(false);
+  }
+  document.querySelector('.modo').addEventListener('click', ev => {
+    const b = ev.target.closest('[data-modo]'); if (!b) return;
+    marcarModo(b.dataset.modo); mostrarTeclado();
+  });
   function mostrarTeclado() { teclado.classList.remove('oculto'); }
   function usarLetras(sim) {
     gradeLetras.classList.toggle('oculto', !sim);
@@ -166,7 +189,7 @@
   const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
   /* ---------- base salva no celular ---------- */
-  let base = null, indice = null;
+  let base = null, idxBrinco = null, chips = null;
   const DB = 'localizador', LOJA = 'base';
   function abrirDB() {
     return new Promise((ok, falha) => {
@@ -186,14 +209,29 @@
   function carregarBase(txt) {
     const b = JSON.parse(txt);
     if (!b || !b.linhas) return false;
-    const idx = {};
+    const idx = {}, lista = [];
     b.linhas.forEach((l, i) => {
-      [l[1], l[2]].forEach(k => { const n = normalizar(k); if (n) (idx[n] = idx[n] || []).push(i); });
+      const n = chaveBrinco(l[1]); if (n) (idx[n] = idx[n] || []).push(i);
+      const d = soNumeros(l[2]); if (d) lista.push([d, i]);
     });
-    base = b; indice = idx;
+    base = b; idxBrinco = idx; chips = lista;
     return true;
   }
   const normalizar = v => String(v == null ? '' : v).replace(/\s+/g, '').toUpperCase();
+  const soNumeros = v => String(v == null ? '' : v).replace(/\D/g, '');
+  const chaveBrinco = v => normalizar(v).replace(/^0+(?=.)/, '');
+  const MIN_CHIP = 5;
+  // brinco: número exato | chip: o número digitado aparece dentro do chip completo
+  function buscarLocal(termo, m) {
+    if (!base) return [];
+    if (m === 'brinco') return (idxBrinco[chaveBrinco(termo)] || []).slice();
+    const d = soNumeros(termo); if (d.length < MIN_CHIP) return [];
+    const exatos = chips.filter(c => c[0] === d || c[0].replace(/^0+/, '') === d.replace(/^0+/, '')).map(c => c[1]);
+    return exatos.length ? exatos : chips.filter(c => c[0].indexOf(d) >= 0).map(c => c[1]);
+  }
+  const confere = (a, termo, m) => m === 'brinco'
+    ? chaveBrinco(a.visual) === chaveBrinco(termo)
+    : soNumeros(a.eletronica).indexOf(soNumeros(termo)) >= 0;
   const fmtData = iso => { const d = new Date(iso); const p = n => String(n).padStart(2, '0'); return p(d.getDate()) + '/' + p(d.getMonth() + 1) + ' às ' + p(d.getHours()) + ':' + p(d.getMinutes()); };
   const fmtPeso = v => v === '' || v == null ? '-' : Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' kg';
   const fmtIdade = m => { if (m === '' || m == null) return '-'; m = Number(m); const a = Math.floor(m / 12), r = m % 12; return [a ? a + (a === 1 ? ' ano' : ' anos') : '', r ? r + (r === 1 ? ' mês' : ' meses') : ''].filter(Boolean).join(' e ') || '0 meses'; };
@@ -273,12 +311,16 @@
     ev.preventDefault();
     const termo = termoEl.value.trim();
     if (!termo) return;
+    if (modo === 'chip' && soNumeros(termo).length < MIN_CHIP) {
+      exibir('<div class="msg erro">Para buscar pelo chip, digite pelo menos ' + MIN_CHIP + ' números.</div>'); return;
+    }
+    const nomeBusca = modo === 'chip' ? 'chip contendo <b>' + esc(soNumeros(termo)) + '</b>' : 'brinco <b>' + esc(termo) + '</b>';
     // 1) busca nos dados salvos no celular (funciona sem internet)
     if (base) {
-      const ids = indice[normalizar(termo)] || [];
+      const ids = buscarLocal(termo, modo);
       if (ids.length) { exibir(ids.map(i => cartao(deLinha(base.linhas[i]))).join('')); return; }
       if (navigator.onLine === false) {
-        exibir('<div class="msg">Nenhum animal <b>' + esc(termo) + '</b> nos dados salvos de ' + fmtData(base.gerado) + '.<br>Atualize os dados quando tiver internet.</div>');
+        exibir('<div class="msg">Nenhum animal com ' + nomeBusca + ' nos dados salvos de ' + fmtData(base.gerado) + '.<br>Atualize os dados quando tiver internet.</div>');
         return;
       }
     } else if (navigator.onLine === false) {
@@ -288,13 +330,15 @@
     // 2) não achou no celular (ou sem dados salvos): consulta o AgroHub ao vivo
     $('btn').disabled = true;
     $('res').innerHTML = '<div class="msg">Buscando no AgroHub…</div>';
-    api({ acao: 'buscar', termo: termo })
+    const termoApi = modo === 'chip' ? soNumeros(termo) : termo, modoBusca = modo;
+    api({ acao: 'buscar', termo: termoApi })
       .then(txt => {
         const r = JSON.parse(txt);
         if (r.erro) { exibir('<div class="msg erro">' + esc(r.erro) + '</div>'); return; }
         let h = '';
-        if (!r.encontrados.length) h = '<div class="msg">Nenhum animal encontrado com <b>' + esc(termo) + '</b>.</div>';
-        r.encontrados.forEach(a => { h += cartao(a); });
+        const lista = (r.encontrados || []).filter(a => confere(a, termoApi, modoBusca));
+        if (!lista.length) h = '<div class="msg">Nenhum animal encontrado com ' + nomeBusca + '.</div>';
+        lista.forEach(a => { h += cartao(a); });
         if (r.falhas && r.falhas.length) h += '<div class="msg erro">Não consegui consultar: ' + esc(r.falhas.join(', ')) + '</div>';
         exibir(h);
       })
@@ -311,7 +355,7 @@
   /* ---------- foto do brinco: lê o número da foto e busca sozinho ---------- */
   let fotoLida = null;
   const fundoMenu = $('fundoMenu');
-  $('foto').addEventListener('click', () => fundoMenu.classList.remove('oculto'));
+  $('foto').addEventListener('click', () => { $('tituloFoto').textContent = modo === 'chip' ? 'Foto do chip' : 'Foto do brinco'; fundoMenu.classList.remove('oculto'); });
   fundoMenu.addEventListener('click', ev => {   // toque fora do menu também fecha
     const bt = ev.target.closest('[data-fonte]');
     if (!bt && ev.target !== fundoMenu) return;
@@ -333,21 +377,25 @@
       im.src = url;
     });
   }
-  const chaveAnimal = v => (indice && indice[normalizar(v)] || []).join(',');
-  function escolherNumero(cands) {   // prefere o número que existe nos dados salvos
+  // só números; com Chip marcado considera só o chip, com Brinco só o brinco
+  function escolherNumero(cands, m) {
+    let nums = [];
+    cands.map(soNumeros).forEach(v => { if (v && nums.indexOf(v) < 0) nums.push(v); });
+    if (m === 'chip') nums = nums.filter(v => v.length >= MIN_CHIP).sort((a, b) => b.length - a.length);
+    else nums = nums.filter(v => v.length <= 8).map(v => v.replace(/^0+(?=.)/, ''));
+    const chave = v => buscarLocal(v, m).join(',');
     const achados = [];
-    cands.forEach(c => [c, c.replace(/^0+/, '')].forEach(v => { if (v && chaveAnimal(v) && achados.indexOf(v) < 0) achados.push(v); }));
+    nums.forEach(v => { if (achados.indexOf(v) < 0 && chave(v)) achados.push(v); });
     if (achados.length) {
-      const k = chaveAnimal(achados[0]);
-      return { numero: achados[0], outros: achados.filter(v => chaveAnimal(v) !== k).slice(0, 3) };
+      const k = chave(achados[0]);
+      return { numero: achados[0], outros: achados.filter(v => chave(v) !== k).slice(0, 3) };
     }
-    const nums = cands.filter(v => /^\d{3,15}$/.test(v));
-    const numero = nums[0] || cands[0] || '';
+    const numero = nums[0] || '';
     return { numero: numero, outros: nums.filter(v => v !== numero).slice(0, 3) };
   }
   function bannerFoto(f, msg) {
     return '<div class="foto-lida"><img src="' + f.img + '" alt=""><div class="txt">'
-      + (msg || ('Número lido da foto<br><b>' + esc(f.numero) + '</b>'
+      + (msg || ((f.modo === 'chip' ? 'Chip' : 'Brinco') + ' lido da foto<br><b>' + esc(f.numero) + '</b>'
         + (f.outros && f.outros.length ? '<div class="outros">' + f.outros.map(v => '<button type="button" data-outro="' + esc(v) + '">' + esc(v) + '</button>').join('') + '</div>' : '')))
       + '</div></div>';
   }
@@ -362,15 +410,15 @@
     if (navigator.onLine === false) { exibir('<div class="msg erro">Ler o número pela foto precisa de internet. Digite o número no teclado.</div>'); return; }
     let img;
     try { img = await reduzirFoto(arq); } catch (e) { exibir('<div class="msg erro">Não consegui abrir a foto.</div>'); return; }
-    $('res').innerHTML = bannerFoto({ img: img }, 'Lendo o número da foto…');
+    $('res').innerHTML = bannerFoto({ img: img }, modo === 'chip' ? 'Lendo o número do chip…' : 'Lendo o número do brinco…');
     $('foto').disabled = true;
     try {
       const r = await lerFoto(img.split(',')[1]);
       if (r.erro) { exibir(bannerFoto({ img: img }, esc(r.erro)) ); return; }
-      const c = escolherNumero(r.candidatos || []);
-      if (!c.numero) { exibir(bannerFoto({ img: img }, 'Não encontrei número na foto.<br>Tire mais perto, com o brinco reto e com boa luz.')); return; }
+      const c = escolherNumero(r.candidatos || [], modo);
+      if (!c.numero) { exibir(bannerFoto({ img: img }, (modo === 'chip' ? 'Não encontrei o número do chip na foto.<br>' : 'Não encontrei o número do brinco na foto.<br>') + 'Tire mais perto, com o brinco reto e com boa luz.')); return; }
       termoEl.value = c.numero; novo = false;
-      fotoLida = { img: img, numero: c.numero, outros: c.outros };
+      fotoLida = { img: img, numero: c.numero, outros: c.outros, modo: modo };
       $('btn').click();
     } catch (e) {
       exibir(bannerFoto({ img: img }, 'Sem conexão para ler a foto. ' + esc(e.message || e)));
@@ -384,7 +432,7 @@
   window.addEventListener('online', () => atualizar(false, true));
 
   // ---- atualização automática do app (troque APP_VERSAO e versao.json a cada mudança) ----
-  const APP_VERSAO = '7';
+  const APP_VERSAO = '8';
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
       const checar = () => reg.update().catch(() => {});
