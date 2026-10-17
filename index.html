@@ -35,10 +35,26 @@
   .msg { margin-top:16px; padding:14px; border-radius:10px; background:#fff; border:1px solid var(--borda); text-align:center; color:var(--cinza); }
   .erro { color:#b3261e; border-color:#f1c4c0; background:#fdf1f0; }
   .campo-busca { position:relative; }
-  .campo-busca input { padding-right:112px; font-size:20px; }
+  .campo-busca input { padding-right:162px; font-size:20px; }
   .acoes-campo { position:absolute; right:8px; top:50%; transform:translateY(-50%); display:flex; gap:6px; }
   .acoes-campo button { width:auto; padding:9px 12px; font-size:15px; border-radius:8px; background:var(--verde2); color:var(--verde); border:1px solid var(--lima); touch-action:manipulation; }
   .acoes-campo .icone { font-size:20px; padding:5px 0; width:44px; text-align:center; }
+  .acoes-campo .icone svg { width:22px; height:22px; display:block; margin:0 auto; }
+  .acoes-campo .foto { background:var(--lima); border-color:var(--lima); }
+  .foto-lida { display:flex; gap:12px; align-items:center; background:#fff; border:1px solid var(--borda); border-left:5px solid var(--lima); border-radius:12px; padding:10px; margin-top:16px; }
+  .foto-lida img { width:84px; height:84px; object-fit:cover; border-radius:8px; flex:none; background:var(--borda); }
+  .foto-lida .txt { font-size:14px; color:var(--cinza); line-height:1.4; min-width:0; }
+  .foto-lida .txt b { font-size:22px; color:var(--verde); word-break:break-all; }
+  .outros { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .outros button { width:auto; font-size:14px; padding:6px 10px; border-radius:8px; background:var(--verde2); color:var(--verde); border:1px solid var(--lima); font-weight:600; }
+  .fundo-menu { position:fixed; inset:0; background:rgba(17,37,61,.45); z-index:20; display:flex; align-items:flex-end; justify-content:center; }
+  .fundo-menu.oculto { display:none; }
+  .menu-foto { background:#fff; width:100%; max-width:480px; border-radius:16px 16px 0 0; padding:14px 16px calc(16px + env(safe-area-inset-bottom)); display:grid; gap:10px; }
+  .menu-foto h2 { margin:2px 0 4px; font-size:17px; text-align:center; color:var(--verde); }
+  .menu-foto button { display:flex; align-items:center; justify-content:center; gap:10px; }
+  .menu-foto button svg { width:24px; height:24px; }
+  .menu-foto .galeria { background:var(--lima); color:var(--verde); }
+  .menu-foto .cancelar { background:var(--verde2); color:var(--cinza); border:1px solid var(--borda); }
   .teclado { margin:0 0 12px; }
   .teclado.oculto { display:none; }
   .grade { display:grid; gap:8px; }
@@ -74,7 +90,10 @@
       <label for="termo" class="rotulo">Brinco ou chip</label>
       <div class="campo-busca">
         <input id="termo" inputmode="none" placeholder="Ex.: 11491" autocomplete="off" autocorrect="off" spellcheck="false">
+        <input type="file" id="fotoCamera" accept="image/*" capture="environment" hidden>
+        <input type="file" id="fotoGaleria" accept="image/*" hidden>
         <div class="acoes-campo">
+          <button type="button" class="icone foto" id="foto" aria-label="Foto do brinco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg></button>
           <button type="button" class="icone" id="apagar" aria-label="Apagar">&#9003;</button>
           <button type="button" class="icone" id="limpar" aria-label="Limpar">&#10005;</button>
         </div>
@@ -96,6 +115,14 @@
   </form>
   <div id="res"></div>
 </main>
+  <div class="fundo-menu oculto" id="fundoMenu">
+    <div class="menu-foto" role="dialog" aria-label="Foto do brinco">
+      <h2>Foto do brinco</h2>
+      <button type="button" data-fonte="fotoCamera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>Tirar foto</button>
+      <button type="button" class="galeria" data-fonte="fotoGaleria"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>Galeria</button>
+      <button type="button" class="cancelar" data-fonte="">Cancelar</button>
+    </div>
+  </div>
 <script>
   const $ = id => document.getElementById(id);
   /* ====== CONFIGURAÇÃO: cole aqui o link do Apps Script (termina em /exec) ====== */
@@ -235,6 +262,7 @@
     };
   }
   function exibir(html) {
+    if (fotoLida) { html = bannerFoto(fotoLida) + html; fotoLida = null; }
     $('res').innerHTML = html;
     novo = true;
     teclado.classList.add('oculto');
@@ -274,6 +302,81 @@
       .finally(() => { $('btn').disabled = false; });
   });
 
+
+  // envia a foto ao Apps Script (OCR do Google) por POST
+  function lerFoto(b64) {
+    return fetch(API_URL, { method: 'POST', body: JSON.stringify(Object.assign({ acao: 'foto', imagem: b64 }, CHAVE ? { chave: CHAVE } : {})) })
+      .then(r => { if (!r.ok) throw new Error('Erro ' + r.status); return r.json(); });
+  }
+  /* ---------- foto do brinco: lê o número da foto e busca sozinho ---------- */
+  let fotoLida = null;
+  const fundoMenu = $('fundoMenu');
+  $('foto').addEventListener('click', () => fundoMenu.classList.remove('oculto'));
+  fundoMenu.addEventListener('click', ev => {   // toque fora do menu também fecha
+    const bt = ev.target.closest('[data-fonte]');
+    if (!bt && ev.target !== fundoMenu) return;
+    fundoMenu.classList.add('oculto');
+    if (bt && bt.dataset.fonte) { const inp = $(bt.dataset.fonte); inp.value = ''; inp.click(); }
+  });
+  function reduzirFoto(arq) {   // diminui a foto (máx. 1600 px) para enviar rápido
+    return new Promise((ok, falha) => {
+      const url = URL.createObjectURL(arq), im = new Image();
+      im.onload = () => {
+        const r = Math.min(1, 1600 / Math.max(im.naturalWidth, im.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.round(im.naturalWidth * r); c.height = Math.round(im.naturalHeight * r);
+        c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        ok(c.toDataURL('image/jpeg', 0.85));
+      };
+      im.onerror = () => { URL.revokeObjectURL(url); falha(new Error('foto')); };
+      im.src = url;
+    });
+  }
+  const chaveAnimal = v => (indice && indice[normalizar(v)] || []).join(',');
+  function escolherNumero(cands) {   // prefere o número que existe nos dados salvos
+    const achados = [];
+    cands.forEach(c => [c, c.replace(/^0+/, '')].forEach(v => { if (v && chaveAnimal(v) && achados.indexOf(v) < 0) achados.push(v); }));
+    if (achados.length) {
+      const k = chaveAnimal(achados[0]);
+      return { numero: achados[0], outros: achados.filter(v => chaveAnimal(v) !== k).slice(0, 3) };
+    }
+    const nums = cands.filter(v => /^\d{3,15}$/.test(v));
+    const numero = nums[0] || cands[0] || '';
+    return { numero: numero, outros: nums.filter(v => v !== numero).slice(0, 3) };
+  }
+  function bannerFoto(f, msg) {
+    return '<div class="foto-lida"><img src="' + f.img + '" alt=""><div class="txt">'
+      + (msg || ('Número lido da foto<br><b>' + esc(f.numero) + '</b>'
+        + (f.outros && f.outros.length ? '<div class="outros">' + f.outros.map(v => '<button type="button" data-outro="' + esc(v) + '">' + esc(v) + '</button>').join('') + '</div>' : '')))
+      + '</div></div>';
+  }
+  $('res').addEventListener('click', ev => {
+    const bt = ev.target.closest('[data-outro]'); if (!bt) return;
+    termoEl.value = bt.dataset.outro; novo = false; $('btn').click();
+  });
+  ['fotoCamera', 'fotoGaleria'].forEach(id => $(id).addEventListener('change', ev => processarFoto(ev.target.files && ev.target.files[0])));
+  async function processarFoto(arq) {
+    if (!arq) return;
+    teclado.classList.add('oculto');
+    if (navigator.onLine === false) { exibir('<div class="msg erro">Ler o número pela foto precisa de internet. Digite o número no teclado.</div>'); return; }
+    let img;
+    try { img = await reduzirFoto(arq); } catch (e) { exibir('<div class="msg erro">Não consegui abrir a foto.</div>'); return; }
+    $('res').innerHTML = bannerFoto({ img: img }, 'Lendo o número da foto…');
+    $('foto').disabled = true;
+    try {
+      const r = await lerFoto(img.split(',')[1]);
+      if (r.erro) { exibir(bannerFoto({ img: img }, esc(r.erro)) ); return; }
+      const c = escolherNumero(r.candidatos || []);
+      if (!c.numero) { exibir(bannerFoto({ img: img }, 'Não encontrei número na foto.<br>Tire mais perto, com o brinco reto e com boa luz.')); return; }
+      termoEl.value = c.numero; novo = false;
+      fotoLida = { img: img, numero: c.numero, outros: c.outros };
+      $('btn').click();
+    } catch (e) {
+      exibir(bannerFoto({ img: img }, 'Sem conexão para ler a foto. ' + esc(e.message || e)));
+    } finally { $('foto').disabled = false; }
+  }
+
   // ao abrir: carrega o que está salvo e, se tiver internet, atualiza sozinho
   lerLocal().then(txt => { try { if (txt) carregarBase(txt); } catch (e) {} mostrarStatus(); atualizar(false, true); });
   // ao voltar para o app depois de um tempo, atualiza de novo
@@ -281,7 +384,7 @@
   window.addEventListener('online', () => atualizar(false, true));
 
   // ---- atualização automática do app (troque APP_VERSAO e versao.json a cada mudança) ----
-  const APP_VERSAO = '6';
+  const APP_VERSAO = '7';
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
       const checar = () => reg.update().catch(() => {});
