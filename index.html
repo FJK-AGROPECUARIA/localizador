@@ -183,7 +183,7 @@
   }
   function apagar() { termoEl.value = novo ? '' : termoEl.value.slice(0, -1); novo = false; }
   termoEl.addEventListener('click', mostrarTeclado);
-  // Limpar: zera tudo e volta ao começo (campo, resultado, foto e Brinco marcado)
+  // Limpar: zera campo, resultado e foto (Brinco/Chip fica como o último escolhido; só abre em Brinco)
   let geracao = 0;
   function limparTudo() {
     geracao++;
@@ -191,7 +191,7 @@
     $('res').innerHTML = '';
     $('btn').disabled = false; $('foto').disabled = false;
     fundoMenu.classList.add('oculto');
-    marcarModo('brinco'); usarLetras(false); mostrarTeclado();
+    marcarModo(modo); usarLetras(false); mostrarTeclado();   // mantém Brinco/Chip como estava
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   $('limpar').addEventListener('click', limparTudo);
@@ -422,13 +422,37 @@
     if (m === 'chip') nums = nums.filter(v => v.length >= MIN_CHIP && !ehBrinco(v)).sort((a, b) => b.length - a.length);
     else nums = nums.filter(v => v.length <= 8).map(v => v.replace(/^0+(?=.)/, '')).filter(v => ehBrinco(v) || !ehChip(v));
     const chave = v => buscarLocal(v, m).join(',');
-    const achados = [];
+    let achados = [];
     nums.forEach(v => { if (achados.indexOf(v) < 0 && chave(v)) achados.push(v); });
+    if (m === 'chip' && base) {
+      // leitura longa com 1 número errado (ex.: 5 lido como 8): acha o trecho do chip que mais se parece
+      const longos = achados.filter(v => v.length >= 7), parecidos = [];
+      if (!longos.length) nums.filter(v => v.length >= 7).forEach(v => {
+        chips.forEach(cp => {
+          const d = cp[0];
+          for (let i = 0; i + v.length <= d.length; i++) {
+            let dif = 0; for (let j = 0; j < v.length && dif < 2; j++) if (d[i + j] !== v[j]) dif++;
+            if (dif < 2) { const t = d.substr(i, v.length); if (parecidos.indexOf(t) < 0) parecidos.push(t); break; }
+          }
+        });
+      });
+      // ordem: leituras longas exatas, depois parecidas, depois pedaços curtos
+      achados = longos.concat(parecidos.filter(v => longos.indexOf(v) < 0), achados.filter(v => v.length < 7));
+    }
     if (achados.length) {
       const k = chave(achados[0]);
       return { numero: achados[0], outros: achados.filter(v => chave(v) !== k).slice(0, 3) };
     }
     const numero = nums[0] || '';
+    if (m === 'brinco' && base && numero.length >= 4) {   // nenhum bateu: sugere brincos com 1 número diferente
+      const sug = [];
+      nums.filter(v => v.length >= 4).slice(0, 3).forEach(v => Object.keys(idxBrinco).forEach(kb => {
+        if (kb.length !== v.length || sug.indexOf(kb) >= 0) return;
+        let dif = 0; for (let j = 0; j < v.length && dif < 2; j++) if (kb[j] !== v[j]) dif++;
+        if (dif === 1) sug.push(kb);
+      }));
+      if (sug.length) return { numero: numero, outros: sug.slice(0, 4) };
+    }
     return { numero: numero, outros: nums.filter(v => v !== numero).slice(0, 3) };
   }
   function bannerFoto(f, msg) {
@@ -444,7 +468,8 @@
     termoEl.value = bt.dataset.outro; novo = false; $('btn').click();
   });
   ['fotoCamera', 'fotoGaleria'].forEach(id => $(id).addEventListener('change', ev => processarFoto(ev.target.files && ev.target.files[0])));
-  // acha chips redondos (disco amarelo com pino escuro no meio) — devolve [{x,y,r,nota}] em coords da imagem
+  // acha chips redondos (disco amarelo com pino escuro no meio), mesmo tortos na foto (vira elipse)
+  // devolve [{x, y, r, m:[m11,m12,m22], nota}] — m leva o círculo de raio 1 até a borda do chip
   function acharChips(px, W, H) {
     const N = W * H, amarelo = new Uint8Array(N), escuro = new Uint8Array(N);
     for (let i = 0; i < N; i++) {
@@ -457,6 +482,7 @@
     }
     const visto = new Uint8Array(N), achados = [], fila = new Int32Array(N);
     const ehAm = (x, y) => x >= 0 && y >= 0 && x < W && y < H && amarelo[y*W+x];
+    const lim = Math.min(W, H) * 0.6;
     for (let i0 = 0; i0 < N; i0++) {
       if (!escuro[i0] || visto[i0]) continue;
       let n = 0, sx = 0, sy = 0, x0 = W, x1 = 0, y0 = H, y1 = 0, ini = 0, fim = 0;
@@ -467,45 +493,84 @@
         for (const j of [i-1, i+1, i-W, i+W]) if (j >= 0 && j < N && !visto[j] && escuro[j] && Math.abs((j % W) - x) <= 1) { visto[j] = 1; fila[fim++] = j; }
       }
       const bw = x1-x0+1, bh = y1-y0+1, asp = bw/bh;
-      if (n < 12 || n > N*0.02 || asp < 0.55 || asp > 1.8) continue;
+      if (n < 12 || n > N*0.15 || asp < 0.4 || asp > 2.5) continue;
       const cx = sx/n, cy = sy/n, rp = Math.max(bw, bh)/2;
-      // raios a partir do pino: tem que sair do escuro direto para o amarelo, em todas as direções
-      const dist = [], bordas = []; let comAm = 0;
-      for (let k = 0; k < 36; k++) {
-        const a = k*Math.PI/18, ca = Math.cos(a), sa = Math.sin(a);
-        let t = rp, achou = false; const lim = Math.min(W, H) * 0.35;
+      // raios a partir do pino: do escuro para o amarelo e até onde o amarelo termina
+      const pts = []; let comAm = 0;
+      for (let k = 0; k < 48; k++) {
+        const a = k*Math.PI/24, ca = Math.cos(a), sa = Math.sin(a);
+        let t = rp;
         while (t < rp*3 && !ehAm(Math.round(cx+ca*t), Math.round(cy+sa*t))) t++;
-        if (t >= rp*3) { dist.push(0); continue; }
-        achou = true; comAm++;
-        let fora = 0;
-        while (t < lim) { if (ehAm(Math.round(cx+ca*t), Math.round(cy+sa*t))) fora = 0; else if (++fora > 3) break; t++; }
-        dist.push(t - fora); bordas.push([cx + ca*(t-fora), cy + sa*(t-fora), t - fora]);
+        if (t >= rp*3) continue;
+        comAm++;
+        let fora = 0, ultimo = t;
+        // aceita buracos (números impressos e o anel escuro do pino) de até ~18% da distância
+        while (t < lim) { if (ehAm(Math.round(cx+ca*t), Math.round(cy+sa*t))) { fora = 0; ultimo = t; } else if (++fora > Math.max(4, t*0.18)) break; t++; }
+        pts.push([cx + ca*ultimo, cy + sa*ultimo]);
       }
-      const bons = dist.filter(v => v > 0).sort((a, b) => a-b);
-      if (comAm < 26) continue;
-      const R = bons[Math.floor(bons.length/2)];
-      const perto = bons.filter(v => Math.abs(v-R) < R*0.15).length / 36;   // borda redonda = distâncias parecidas
-      if (R < rp*1.8) continue;
-      // ajusta um círculo nos pontos da borda (centro mais exato que o do pino)
-      const pts = bordas.filter(p => Math.abs(p[2]-R) < R*0.2);
-      let fx = cx, fy = cy, fr = R;
-      if (pts.length >= 8) {
-        let sxx=0, syy=0, sxy=0, sx1=0, sy1=0, sxz=0, syz=0, sz=0; const m = pts.length;
-        pts.forEach(([x, y]) => { const z = x*x + y*y; sxx+=x*x; syy+=y*y; sxy+=x*y; sx1+=x; sy1+=y; sxz+=x*z; syz+=y*z; sz+=z; });
-        // resolve [sxx sxy sx1; sxy syy sy1; sx1 sy1 m] [A B C] = [sxz syz sz]
-        const M = [[sxx,sxy,sx1,sxz],[sxy,syy,sy1,syz],[sx1,sy1,m,sz]];
-        for (let c = 0; c < 3; c++) { let p = c; for (let r2 = c+1; r2 < 3; r2++) if (Math.abs(M[r2][c]) > Math.abs(M[p][c])) p = r2; [M[c], M[p]] = [M[p], M[c]];
-          for (let r2 = 0; r2 < 3; r2++) if (r2 !== c) { const f = M[r2][c]/M[c][c]; for (let k = c; k < 4; k++) M[r2][k] -= f*M[c][k]; } }
-        const A = M[0][3]/M[0][0], B = M[1][3]/M[1][1], C = M[2][3]/M[2][2];
-        const nx = A/2, ny = B/2, nr = Math.sqrt(C + nx*nx + ny*ny);
-        if (isFinite(nr) && Math.hypot(nx-cx, ny-cy) < R*0.5 && nr > R*0.7 && nr < R*1.3) { fx = nx; fy = ny; fr = nr; }
+      if (comAm < 34 || pts.length < 20) continue;
+      // RANSAC: testa várias elipses com 6 pontos e fica com a que mais pontos concordam (ignora raios que fugiram)
+      let el = null, melhor = 0, sem = 12345 + i0;
+      const rnd = () => { sem = (sem * 1103515245 + 12345) & 0x7fffffff; return sem / 0x7fffffff; };
+      for (let it = 0; it < 120; it++) {
+        const amostra = []; while (amostra.length < 6) { const p = pts[Math.floor(rnd() * pts.length)]; if (amostra.indexOf(p) < 0) amostra.push(p); }
+        const e = ajustarElipse(amostra); if (!e || e.b / e.a < 0.45) continue;
+        const nIn = pts.filter(p => Math.abs(distElipse(e, p) - 1) < 0.07).length;
+        if (nIn > melhor) { melhor = nIn; el = e; }
       }
-      achados.push({ x: fx, y: fy, r: fr, nota: (comAm/36) * perto });
+      if (!el) continue;
+      for (let volta = 0; volta < 2; volta++) {
+        const bons = pts.filter(p => Math.abs(distElipse(el, p) - 1) < 0.07);
+        const novo = bons.length >= 8 ? ajustarElipse(bons) : null; if (novo && novo.b / novo.a >= 0.45) el = novo;
+      }
+      const inl = pts.filter(p => Math.abs(distElipse(el, p) - 1) < 0.08).length / 48;
+      if (el.b / el.a < 0.45 || el.b < rp * 1.3 || Math.hypot(el.x - cx, el.y - cy) > el.b * 0.45) continue;
+      // confere: anel de fora tem que ser quase todo amarelo e o meio tem que ter o pino escuro
+      let am = 0, tot = 0, esc = 0, totC = 0;
+      for (let k = 0; k < 64; k++) {
+        const a = k*Math.PI/32, ux = Math.sin(a), uy = -Math.cos(a);
+        for (const f of [0.6, 0.72, 0.84, 0.93]) { const x = Math.round(el.x + f*(el.m[0]*ux + el.m[1]*uy)), y = Math.round(el.y + f*(el.m[1]*ux + el.m[2]*uy)); tot++; if (ehAm(x, y)) am++; }
+        for (const f of [0.1, 0.2]) { const x = Math.round(el.x + f*(el.m[0]*ux + el.m[1]*uy)), y = Math.round(el.y + f*(el.m[1]*ux + el.m[2]*uy)); totC++; if (x >= 0 && y >= 0 && x < W && y < H && escuro[y*W+x]) esc++; }
+      }
+      const fAm = am / tot, fEsc = esc / totC;
+      if (fAm < 0.5) continue;
+      achados.push({ x: el.x, y: el.y, r: Math.sqrt(el.a*el.b), m: el.m, a: el.a, b: el.b, nota: (comAm/48) * inl * fAm * (fEsc > 0.3 ? 1 : 0.6) });
     }
-    return achados.sort((a, b) => b.nota - a.nota).slice(0, 3);
+    achados.sort((p, q) => q.nota - p.nota);
+    // se um achado está dentro de outro bem maior (ex.: anel amarelo do pino), fica o maior
+    const fim = achados.filter(p => !achados.some(q => q !== p && q.nota >= 0.2 && q.r > p.r*1.5 && Math.hypot(q.x-p.x, q.y-p.y) < q.r*0.5));
+    return fim.slice(0, 5);
   }
+  // ajuste de elipse: A x² + B xy + C y² + D x + E y = 1 (coordenadas centradas)
+  function ajustarElipse(pts) {
+    const n = pts.length; let mx = 0, my = 0; pts.forEach(p => { mx += p[0]; my += p[1]; }); mx /= n; my /= n;
+    let esc = 0; pts.forEach(p => { esc += Math.hypot(p[0]-mx, p[1]-my); }); esc = esc/n || 1;
+    const M = [0,1,2,3,4].map(() => [0,0,0,0,0,0]);
+    pts.forEach(p => { const x = (p[0]-mx)/esc, y = (p[1]-my)/esc, v = [x*x, x*y, y*y, x, y];
+      for (let i = 0; i < 5; i++) { for (let j = 0; j < 5; j++) M[i][j] += v[i]*v[j]; M[i][5] += v[i]; } });
+    for (let c = 0; c < 5; c++) { let p = c; for (let r = c+1; r < 5; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r; [M[c], M[p]] = [M[p], M[c]];
+      if (Math.abs(M[c][c]) < 1e-12) return null;
+      for (let r = 0; r < 5; r++) if (r !== c) { const f = M[r][c]/M[c][c]; for (let k = c; k < 6; k++) M[r][k] -= f*M[c][k]; } }
+    const [A, B, C, D, E] = M.map((r, i) => r[5]/r[i]);
+    if (B*B - 4*A*C >= 0) return null;
+    const det = 4*A*C - B*B, x0 = (B*E - 2*C*D)/det, y0 = (B*D - 2*A*E)/det;
+    const F = 1 - (A*x0*x0 + B*x0*y0 + C*y0*y0 + D*x0 + E*y0);   // (x-x0)ᵀQ(x-x0) = F
+    if (F <= 0) return null;
+    const q11 = A/F, q12 = B/2/F, q22 = C/F;                       // forma: uᵀQu = 1
+    const tr = q11 + q22, dt = q11*q22 - q12*q12, disc = Math.sqrt(Math.max(0, tr*tr/4 - dt));
+    const l1 = tr/2 + disc, l2 = tr/2 - disc; if (l2 <= 0) return null;
+    const a = esc / Math.sqrt(l2), b = esc / Math.sqrt(l1);        // semi-eixos (a ≥ b)
+    // m = Q^(-1/2) (em pixels): leva o círculo unitário até a elipse sem espelhar
+    const th = 0.5 * Math.atan2(2*q12, q11 - q22), c = Math.cos(th), s = Math.sin(th);
+    const s1 = esc / Math.sqrt(l1), s2 = esc / Math.sqrt(l2);      // ao longo de (c,s) usa autovalor de q11 dir.
+    const e1 = q11*c*c + 2*q12*c*s + q22*s*s;                      // autovalor na direção (c,s)
+    const k1 = esc / Math.sqrt(e1), k2 = esc / Math.sqrt(tr - e1);
+    const m = [k1*c*c + k2*s*s, (k1 - k2)*c*s, k1*s*s + k2*c*c];
+    return { x: mx + x0*esc, y: my + y0*esc, a: a, b: b, m: m, Q: [q11/(esc*esc), q12/(esc*esc), q22/(esc*esc)] };
+  }
+  function distElipse(el, p) { const dx = p[0]-el.x, dy = p[1]-el.y; return Math.sqrt(el.Q[0]*dx*dx + 2*el.Q[1]*dx*dy + el.Q[2]*dy*dy); }
   // procura o chip sozinho na foto (reduz para 480 px para ser rápido)
-  function detectarChip(img) {
+  function detectarChips(img) {
     return new Promise(ok => {
       const im = new Image();
       im.onload = () => {
@@ -513,14 +578,197 @@
           const k = 480 / Math.max(im.naturalWidth, im.naturalHeight), W = Math.round(im.naturalWidth * k), H = Math.round(im.naturalHeight * k);
           const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
           const cx = cv.getContext('2d'); cx.drawImage(im, 0, 0, W, H);
-          const lista = acharChips(cx.getImageData(0, 0, W, H).data, W, H).filter(c => c.nota >= 0.4);
-          ok(lista.length ? { x: lista[0].x / k, y: lista[0].y / k, r: lista[0].r / k } : null);
+          ok(acharChips(cx.getImageData(0, 0, W, H).data, W, H).filter(c => c.nota >= 0.25).slice(0, 3)
+            .map(c => ({ x: c.x / k, y: c.y / k, r: c.r / k, m: c.m.map(v => v / k) })));
+        } catch (e) { ok([]); }
+      };
+      im.onerror = () => ok([]);
+      im.src = img;
+    });
+  }
+  // brinco grande (amarelo, não redondo): recorta, deixa só os números em preto e lê no celular, girando um pouco
+  function recortarBrinco(img, chips) {
+    return new Promise(ok => {
+      const im = new Image();
+      im.onload = () => {
+        try {
+          const W0 = im.naturalWidth, H0 = im.naturalHeight, k = 600 / Math.max(W0, H0), W = Math.round(W0 * k), H = Math.round(H0 * k);
+          const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+          const c2 = cv.getContext('2d'); c2.drawImage(im, 0, 0, W, H);
+          const px = c2.getImageData(0, 0, W, H).data, N = W * H, am = new Uint8Array(N);
+          for (let i = 0; i < N; i++) {
+            const r = px[i*4]/255, g = px[i*4+1]/255, b = px[i*4+2]/255, mx = Math.max(r,g,b), d = mx - Math.min(r,g,b);
+            let h = 0; if (d > 0) { if (mx === r) h = 60*(((g-b)/d)%6); else if (mx === g) h = 60*((b-r)/d+2); else h = 60*((r-g)/d+4); } if (h < 0) h += 360;
+            am[i] = (h >= 38 && h <= 75 && d/mx > 0.3 && mx > 0.35) ? 1 : 0;
+          }
+          (chips || []).forEach(c => {   // tira o chip redondo da conta
+            const R = c.r * k * 1.15, cx = c.x * k, cy = c.y * k;
+            for (let y = Math.max(0, cy - R | 0); y < Math.min(H, cy + R); y++) for (let x = Math.max(0, cx - R | 0); x < Math.min(W, cx + R); x++) if ((x-cx)*(x-cx) + (y-cy)*(y-cy) < R*R) am[y*W+x] = 0;
+          });
+          // maior mancha amarela = brinco
+          const lab = new Int32Array(N), fila = new Int32Array(N); let melhor = 0, melhorN = 0, id = 0;
+          for (let i0 = 0; i0 < N; i0++) {
+            if (!am[i0] || lab[i0]) continue;
+            id++; let ini = 0, fim = 0, n = 0; fila[fim++] = i0; lab[i0] = id;
+            while (ini < fim) { const i = fila[ini++], x = i % W; n++;
+              for (const j of [i-1, i+1, i-W, i+W]) if (j >= 0 && j < N && !lab[j] && am[j] && Math.abs((j % W) - x) <= 1) { lab[j] = id; fila[fim++] = j; } }
+            if (n > melhorN) { melhorN = n; melhor = id; }
+          }
+          if (melhorN < N * 0.01) return ok(null);
+          // área do brinco = mancha + buracos (os números ficam dentro)
+          let x0 = W, x1 = 0, y0 = H, y1 = 0;
+          for (let i = 0; i < N; i++) if (lab[i] === melhor) { const x = i % W, y = (i / W) | 0; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+          const fora = new Uint8Array(N); let ini = 0, fim = 0;
+          const semente = i => { if (!fora[i] && lab[i] !== melhor) { fora[i] = 1; fila[fim++] = i; } };
+          for (let x = 0; x < W; x++) { semente(x); semente((H-1)*W + x); } for (let y = 0; y < H; y++) { semente(y*W); semente(y*W + W-1); }
+          while (ini < fim) { const i = fila[ini++], x = i % W; for (const j of [i-1, i+1, i-W, i+W]) if (j >= 0 && j < N && Math.abs((j % W) - x) <= 1) semente(j); }
+          // recorte na foto grande, números em preto
+          const X0 = Math.floor(x0 / k), Y0 = Math.floor(y0 / k), CW = Math.ceil((x1 - x0 + 1) / k), CH = Math.ceil((y1 - y0 + 1) / k);
+          const esc = 500 / Math.max(CW, CH), OW = Math.round(CW * esc), OH = Math.round(CH * esc);
+          const out = document.createElement('canvas'); out.width = OW + 40; out.height = OH + 40;
+          const co = out.getContext('2d'); co.fillStyle = '#fff'; co.fillRect(0, 0, out.width, out.height);
+          co.drawImage(im, X0, Y0, CW, CH, 20, 20, OW, OH);
+          const d2 = co.getImageData(20, 20, OW, OH), q = d2.data, dentro = new Uint8Array(OW * OH), sat = new Float32Array(OW * OH), hist = new Float64Array(64);
+          for (let y = 0; y < OH; y++) for (let x = 0; x < OW; x++) {
+            const sx = Math.min(W - 1, Math.floor(x0 + x / esc * k)), sy = Math.min(H - 1, Math.floor(y0 + y / esc * k)), j = y*OW + x, i = j * 4;
+            const r = q[i]/255, g = q[i+1]/255, b = q[i+2]/255, mx = Math.max(r,g,b);
+            sat[j] = mx ? (mx - Math.min(r,g,b)) / mx : 0;
+            if (!fora[sy*W + sx]) { dentro[j] = 1; hist[Math.min(63, sat[j] * 64 | 0)]++; }
+          }
+          // separa número (pouca cor) do amarelo (muita cor) pelo método de Otsu
+          let tot = 0, soma = 0; for (let i = 0; i < 64; i++) { tot += hist[i]; soma += i * hist[i]; }
+          let wB = 0, sB = 0, melhorV = -1, lim = 28;
+          for (let i = 0; i < 64; i++) { wB += hist[i]; if (!wB || wB === tot) continue; sB += i * hist[i];
+            const mB = sB / wB, mF = (soma - sB) / (tot - wB), v = wB * (tot - wB) * (mB - mF) * (mB - mF); if (v > melhorV) { melhorV = v; lim = i; } }
+          const corte = Math.min(0.55, Math.max(0.2, (lim + 1) / 64));
+          for (let j = 0; j < OW * OH; j++) { const v = dentro[j] && sat[j] < corte ? 0 : 255; q[j*4] = q[j*4+1] = q[j*4+2] = v; q[j*4+3] = 255; }
+          co.putImageData(d2, 20, 20);
+          ok(out);
         } catch (e) { ok(null); }
       };
       im.onerror = () => ok(null);
       im.src = img;
     });
   }
+  function girar(cv, graus) {
+    const a = graus * Math.PI / 180, c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a));
+    const o = document.createElement('canvas'); o.width = Math.ceil(cv.width * c + cv.height * s); o.height = Math.ceil(cv.width * s + cv.height * c);
+    const x = o.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, o.width, o.height);
+    x.translate(o.width / 2, o.height / 2); x.rotate(a); x.drawImage(cv, -cv.width / 2, -cv.height / 2);
+    return o;
+  }
+  // acha a linha dos números grandes (ignora o "FJK" e a borda), deixa reta e recorta
+  function linhaDosNumeros(cv) {
+    const W = cv.width, H = cv.height, d = cv.getContext('2d').getImageData(0, 0, W, H).data, N = W * H;
+    const tinta = new Uint8Array(N); for (let i = 0; i < N; i++) tinta[i] = d[i*4] < 128 ? 1 : 0;
+    const lab = new Int32Array(N), fila = new Int32Array(N), comps = []; let id = 0;
+    for (let i0 = 0; i0 < N; i0++) {
+      if (!tinta[i0] || lab[i0]) continue;
+      id++; let ini = 0, fim = 0, n = 0, sx = 0, sy = 0, x0 = W, x1 = 0, y0 = H, y1 = 0; fila[fim++] = i0; lab[i0] = id;
+      while (ini < fim) { const i = fila[ini++], x = i % W, y = (i / W) | 0; n++; sx += x; sy += y;
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+        for (const j of [i-1, i+1, i-W, i+W]) if (j >= 0 && j < N && !lab[j] && tinta[j] && Math.abs((j % W) - x) <= 1) { lab[j] = id; fila[fim++] = j; } }
+      const h = y1 - y0 + 1, w = x1 - x0 + 1;
+      if (h < 12 || n < 60 || w > h * 2.5 || h > H * 0.7) continue;
+      comps.push({ id: id, h: h, cx: sx / n, cy: sy / n });
+    }
+    if (comps.length < 2) return null;
+    const hmax = Math.max(...comps.map(c => c.h));
+    let dig = comps.filter(c => c.h >= hmax * 0.6), k = 0, b = 0;
+    for (;;) {   // reta pelos centros dos números; tira quem está fora da linha
+      const n = dig.length, mx = dig.reduce((a, c) => a + c.cx, 0) / n, my = dig.reduce((a, c) => a + c.cy, 0) / n;
+      let sxx = 0, sxy = 0; dig.forEach(c => { sxx += (c.cx - mx) ** 2; sxy += (c.cx - mx) * (c.cy - my); });
+      k = sxx ? sxy / sxx : 0; b = my - k * mx;
+      let pior = -1, res = 0; dig.forEach((c, i) => { const r = Math.abs(c.cy - (k * c.cx + b)); if (r > res) { res = r; pior = i; } });
+      if (res <= hmax * 0.35 || dig.length <= 3) break;
+      dig.splice(pior, 1);
+    }
+    const ids = new Set(dig.map(c => c.id)), so = document.createElement('canvas'); so.width = W; so.height = H;
+    const sc = so.getContext('2d'), sd = sc.createImageData(W, H);
+    for (let i = 0; i < N; i++) { const v = ids.has(lab[i]) ? 0 : 255; sd.data[i*4] = sd.data[i*4+1] = sd.data[i*4+2] = v; sd.data[i*4+3] = 255; }
+    sc.putImageData(sd, 0, 0);
+    const reto = girar(so, -Math.atan(k) * 180 / Math.PI), rd = reto.getContext('2d').getImageData(0, 0, reto.width, reto.height).data;
+    let x0 = reto.width, x1 = 0, y0 = reto.height, y1 = 0;
+    for (let y = 0; y < reto.height; y++) for (let x = 0; x < reto.width; x++) if (rd[(y*reto.width + x)*4] < 128) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    if (x1 <= x0) return null;
+    return { cv: reto, x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  }
+  function tamanhoAltura(l, alt) {   // linha recortada com a altura das letras pedida (o leitor gosta de ~40-90 px)
+    const s = alt / l.h, o = document.createElement('canvas'); o.width = Math.round(l.w * s) + 30; o.height = alt + 30;
+    const x = o.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, o.width, o.height);
+    x.drawImage(l.cv, l.x, l.y, l.w, l.h, 15, 15, l.w * s, alt);
+    return o.toDataURL('image/png');
+  }
+  async function lerBrincoLocal(img) {
+    const chips = await detectarChips(img);
+    const cv = await recortarBrinco(img, chips);
+    if (!cv) return [];
+    const todos = [], votos = {};
+    const linha = linhaDosNumeros(cv);
+    if (linha) for (const alt of [60, 40, 90]) {   // 1º jeito: só a linha dos números, reta
+      let nums = [];
+      try { nums = await ocrLocal(tamanhoAltura(linha, alt), '7'); } catch (e) { break; }
+      nums.forEach(v => { votos[v] = (votos[v] || 0) + 2; if (todos.indexOf(v) < 0) todos.push(v); });
+      if (nums.some(v => buscarLocal(v, 'brinco').length)) return todos.sort((a, b) => (votos[b] - votos[a]) || (b.length - a.length));
+    }
+    for (const g of [0, -15, 15, -30, 30, -45, 45, 90, -90, 180]) {
+      let nums = [];
+      try { nums = await ocrLocal(girar(cv, g).toDataURL('image/png')); } catch (e) { break; }
+      nums.forEach(v => { votos[v] = (votos[v] || 0) + 1; if (todos.indexOf(v) < 0) todos.push(v); });
+      if (nums.some(v => buscarLocal(v, 'brinco').length)) break;   // achou um brinco que existe
+    }
+    // mais lidos primeiro
+    return todos.sort((a, b) => (votos[b] - votos[a]) || (b.length - a.length));
+  }
+  /* ---------- leitor de números no próprio celular (funciona sem internet) ---------- */
+  // arquivos do leitor (versões fixas; o celular guarda depois do 1º uso)
+  const CDN = 'https://cdn.jsdelivr.net/npm/';
+  const OCR = { js: CDN + 'tesseract.js@5.1.1/dist/tesseract.min.js', worker: CDN + 'tesseract.js@5.1.1/dist/worker.min.js',
+    core: CDN + 'tesseract.js-core@5.1.1/', lang: CDN + '@tesseract.js-data/eng@1.0.0/4.0.0_best_int' };
+  let ocrPronto = null;
+  function carregarOCR() {
+    if (ocrPronto) return ocrPronto;
+    const simd = (() => { try { return WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11])); } catch (e) { return false; } })();
+    ocrPronto = new Promise((ok, falha) => {
+      if (window.Tesseract) return ok();
+      const sc = document.createElement('script'); sc.src = OCR.js; sc.crossOrigin = 'anonymous';
+      sc.onload = ok; sc.onerror = () => falha(new Error('leitor'));
+      document.head.appendChild(sc);
+    }).then(() => Tesseract.createWorker('eng', 1, {
+      workerPath: OCR.worker, langPath: OCR.lang,
+      corePath: OCR.core + (simd ? 'tesseract-core-simd-lstm.wasm.js' : 'tesseract-core-lstm.wasm.js')
+    })).then(async w => { await w.setParameters({ tessedit_char_whitelist: '0123456789 ', tessedit_pageseg_mode: '6' }); return w; });
+    ocrPronto.catch(() => { ocrPronto = null; });
+    return ocrPronto;
+  }
+  function numerosDoTexto(t) {   // blocos de dígitos + blocos vizinhos juntos (ex.: "5633 0002")
+    const lista = [];
+    String(t || '').split(/\n+/).forEach(linha => {
+      const g = linha.match(/\d+/g) || [];
+      g.forEach((v, i) => { [v, g[i + 1] ? v + g[i + 1] : ''].forEach(x => { if (x.length >= 2 && lista.indexOf(x) < 0) lista.push(x); }); });
+    });
+    return lista;
+  }
+  async function ocrLocal(img, psm) {
+    const w = await Promise.race([carregarOCR(), new Promise((_, f) => setTimeout(() => f(new Error('demorou')), 25000))]);
+    if (psm) await w.setParameters({ tessedit_pageseg_mode: psm });
+    try { const r = await w.recognize(img); return numerosDoTexto(r.data.text); }
+    finally { if (psm) await w.setParameters({ tessedit_pageseg_mode: '6' }); }
+  }
+  // chip: lê primeiro no celular; se não bater com nenhum chip e tiver internet, pede ao Google também
+  async function lerNumerosChip(faixa) {
+    let cands = [];
+    try { cands = await ocrLocal(faixa); } catch (e) {}
+    const bate = l => l.some(v => v.length >= MIN_CHIP && buscarLocal(v, 'chip').length);
+    if (bate(cands) || navigator.onLine === false) return { candidatos: cands };
+    try {
+      const r = await lerFoto(faixa.split(',')[1]);
+      if (r.erro && !cands.length) return r;
+      return { candidatos: (r.candidatos || []).concat(cands) };
+    } catch (e) { if (cands.length) return { candidatos: cands }; throw e; }
+  }
+  // já deixa o leitor baixado para funcionar depois sem internet
+  setTimeout(() => { if (navigator.onLine !== false) carregarOCR().catch(() => {}); }, 5000);
   // pede 2 toques na foto: centro e borda do chip redondo
   function marcarChip(img, aviso) {
     return new Promise(fim => {
@@ -566,7 +814,7 @@
           const g = (xx, yy) => { const i = (yy * W0 + xx) * 4; return 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]; };
           return (g(x0, y0) * (1 - fx) + g(x0 + 1, y0) * fx) * (1 - fy) + (g(x0, y0 + 1) * (1 - fx) + g(x0 + 1, y0 + 1) * fx) * fy;
         };
-        const R = c.r, faixas = [[0.5, 1.0, false], [0.4, 0.9, false], [0.55, 1.05, false], [0.5, 1.0, true]];
+        const R = c.r, M = c.m || [c.r, 0, c.r], faixas = [[0.5, 1.0, false], [0.4, 0.9, false], [0.55, 1.05, false], [0.5, 1.0, true]];
         const k = Math.max(1, 70 / (0.5 * R));            // altura mínima de 70 px por faixa
         const H = Math.round(0.5 * R * k), W = Math.min(3000, Math.round(2 * Math.PI * 0.78 * R * k * 2));   // 2 voltas
         const gap = 24, out = document.createElement('canvas');
@@ -580,7 +828,8 @@
             for (let y = 0; y < H; y++) {
               const t = y / (H - 1), r = f[2] ? R * (f[0] + (f[1] - f[0]) * t) : R * (f[1] - (f[1] - f[0]) * t);
               const sx = f[2] ? -sa : sa, sy = f[2] ? ca : -ca;
-              vals[y * W + x] = cinza(c.x + r * sx, c.y + r * sy);
+              const fr = r / R;
+              vals[y * W + x] = cinza(c.x + fr * (M[0] * sx + M[1] * sy), c.y + fr * (M[1] * sx + M[2] * sy));
             }
           }
           const ord = Array.from(vals).sort((p, q) => p - q);
@@ -601,40 +850,49 @@
   async function processarFoto(arq) {
     if (!arq) return;
     teclado.classList.add('oculto');
-    if (navigator.onLine === false) { exibir('<div class="msg erro">Ler o número pela foto precisa de internet. Digite o número no teclado.</div>'); return; }
     let img;
     try { img = await reduzirFoto(arq); } catch (e) { exibir('<div class="msg erro">Não consegui abrir a foto.</div>'); return; }
     const modoFoto = modo, g = geracao;
-    let envio = img, auto = false;
-    if (modoFoto === 'chip') {
-      $('res').innerHTML = bannerFoto({ img: img }, 'Procurando o chip redondo na foto…');
-      let c = await detectarChip(img);
-      if (g !== geracao) return;
-      auto = !!c;
-      if (!c) c = await marcarChip(img, 'Não achei o chip redondo sozinho. Marque ele na foto:');
-      if (g !== geracao) return;
-      if (!c) { $('res').innerHTML = ''; return; }
-      try { envio = await desenrolarChip(img, c); } catch (e) { envio = img; }
-    }
-    $('res').innerHTML = bannerFoto({ img: img }, modoFoto === 'chip' ? 'Lendo o número do chip…' : 'Lendo o número do brinco…');
     $('foto').disabled = true;
     try {
-      let r = await lerFoto(envio.split(',')[1]);
-      if (g !== geracao) return;
-      if (r.erro) { exibir(bannerFoto({ img: img }, esc(r.erro)) ); return; }
-      let c = escolherNumero(r.candidatos || [], modoFoto);
-      // achou o redondo sozinho mas o número não bateu com nenhum chip: deixa marcar na mão e tenta de novo
-      if (modoFoto === 'chip' && auto && !buscarLocal(c.numero || '', 'chip').length) {
-        $('foto').disabled = false;
-        const m = await marcarChip(img, 'Não consegui ler o chip direito. Marque ele na foto:');
+      let c = { numero: '', outros: [] };
+      const achou = v => buscarLocal(v || '', modoFoto).length > 0;
+      if (modoFoto === 'chip') {
+        $('res').innerHTML = bannerFoto({ img: img }, 'Procurando o chip redondo na foto…');
+        const lista = await detectarChips(img);
         if (g !== geracao) return;
-        if (!m) { $('res').innerHTML = ''; return; }
-        $('res').innerHTML = bannerFoto({ img: img }, 'Lendo o número do chip…');
-        $('foto').disabled = true;
-        r = await lerFoto((await desenrolarChip(img, m)).split(',')[1]);
-        if (g !== geracao) return;
-        if (r.erro) { exibir(bannerFoto({ img: img }, esc(r.erro)) ); return; }
-        c = escolherNumero(r.candidatos || [], modoFoto);
+        // tenta cada redondo achado até o número bater com um chip
+        for (let n = 0; n < lista.length && !achou(c.numero); n++) {
+          $('res').innerHTML = bannerFoto({ img: img }, 'Lendo o número do chip…');
+          const r = await lerNumerosChip(await desenrolarChip(img, lista[n]));
+          if (g !== geracao) return;
+          const e = escolherNumero(r.candidatos || [], 'chip');
+          if (achou(e.numero) || (!c.numero && e.numero)) c = e;
+        }
+        if (!achou(c.numero)) {   // não deu sozinho: marca na mão
+          $('foto').disabled = false;
+          const m = await marcarChip(img, lista.length ? 'Não consegui ler o chip direito. Marque ele na foto:' : 'Não achei o chip redondo sozinho. Marque ele na foto:');
+          if (g !== geracao) return;
+          if (!m) { $('res').innerHTML = ''; return; }
+          $('res').innerHTML = bannerFoto({ img: img }, 'Lendo o número do chip…');
+          $('foto').disabled = true;
+          const r = await lerNumerosChip(await desenrolarChip(img, m));
+          if (g !== geracao) return;
+          if (r.erro && !(r.candidatos || []).length) { exibir(bannerFoto({ img: img }, esc(r.erro))); return; }
+          c = escolherNumero(r.candidatos || [], 'chip');
+        }
+      } else {
+        $('res').innerHTML = bannerFoto({ img: img }, 'Lendo o número do brinco…');
+        if (navigator.onLine !== false) {   // com internet: Google primeiro
+          try { const r = await lerFoto(img.split(',')[1]); if (!r.erro) c = escolherNumero(r.candidatos || [], 'brinco'); } catch (e) {}
+          if (g !== geracao) return;
+        }
+        if (!achou(c.numero)) {   // sem internet (ou o Google não achou): lê no celular
+          const nums = await lerBrincoLocal(img);
+          if (g !== geracao) return;
+          const e = escolherNumero(nums, 'brinco');
+          if (achou(e.numero) || !c.numero) c = e;
+        }
       }
       if (!c.numero) { exibir(bannerFoto({ img: img }, (modoFoto === 'chip' ? 'Não consegui ler o número do chip redondo.<br>Tente de novo marcando bem o centro e a borda do chip, ou digite o número.' : 'Não encontrei o número do brinco na foto.<br>Tire mais perto, com o brinco reto e com boa luz.'))); return; }
       termoEl.value = c.numero; novo = false;
@@ -653,7 +911,7 @@
   window.addEventListener('online', () => atualizar(false, true));
 
   // ---- atualização automática do app (troque APP_VERSAO e versao.json a cada mudança) ----
-  const APP_VERSAO = '14';
+  const APP_VERSAO = '15';
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
       const checar = () => reg.update().catch(() => {});
