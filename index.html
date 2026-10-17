@@ -35,7 +35,7 @@
   .msg { margin-top:16px; padding:14px; border-radius:10px; background:#fff; border:1px solid var(--borda); text-align:center; color:var(--cinza); }
   .erro { color:#b3261e; border-color:#f1c4c0; background:#fdf1f0; }
   .campo-busca { position:relative; }
-  .campo-busca input { padding-right:112px; font-size:20px; }
+  .campo-busca input { padding-right:64px; font-size:20px; }
   .topo-busca { display:flex; align-items:center; gap:10px; margin:4px 0 10px; }
   .modo { flex:1; display:flex; background:#fff; border:1px solid var(--borda); border-radius:12px; padding:4px; gap:4px; }
   .modo button { flex:1; width:auto; font-size:18px; padding:10px 0; border-radius:9px; background:transparent; color:var(--cinza); font-weight:700; touch-action:manipulation; }
@@ -84,7 +84,8 @@
   .teclado button:active { background:var(--verde2); }
   .teclado .acao { font-size:18px; color:var(--cinza); }
   .grade.letras .acao { font-size:15px; }
-  .l2 { grid-column:span 2; } .l3 { grid-column:span 3; } .l4 { grid-column:span 4; }
+  .l2 { grid-column:span 2; } .l3 { grid-column:span 3; } .l4 { grid-column:span 4; } .l5 { grid-column:span 5; }
+  .teclado [data-k=APAGAR] { font-size:26px; color:var(--verde); }
   .rotulo { font-size:20px; font-weight:800; color:var(--verde); margin:4px 0 10px; }
   .barra-dados { background:#fff; border:1px solid var(--borda); border-radius:12px; padding:10px 12px; margin-bottom:14px; display:flex; gap:10px; align-items:center; }
   .status { flex:1; font-size:13px; color:var(--cinza); line-height:1.35; }
@@ -117,21 +118,20 @@
         <input type="file" id="fotoCamera" accept="image/*" capture="environment" hidden>
         <input type="file" id="fotoGaleria" accept="image/*" hidden>
         <div class="acoes-campo">
-          <button type="button" class="icone" id="apagar" aria-label="Apagar">&#9003;</button>
-          <button type="button" class="icone" id="limpar" aria-label="Limpar">&#10005;</button>
+          <button type="button" class="icone" id="limpar" aria-label="Limpar tudo">&#10005;</button>
         </div>
       </div>
     </div>
     <div class="teclado" id="teclado">
       <div class="grade num" id="gradeNum">
         <button type="button" data-k="1">1</button><button type="button" data-k="2">2</button><button type="button" data-k="3">3</button><button type="button" data-k="4">4</button><button type="button" data-k="5">5</button><button type="button" data-k="6">6</button><button type="button" data-k="7">7</button><button type="button" data-k="8">8</button><button type="button" data-k="9">9</button>
-        <button type="button" class="acao" data-k="LIMPAR">Limpar</button><button type="button" data-k="0">0</button><button type="button" class="acao" data-k="ABC">ABC</button>
+        <button type="button" class="acao" data-k="ABC">ABC</button><button type="button" data-k="0">0</button><button type="button" class="acao" data-k="APAGAR" aria-label="Apagar">&#9003;</button>
       </div>
       <div class="grade letras oculto" id="gradeLetras">
         <button type="button" data-k="Q">Q</button><button type="button" data-k="W">W</button><button type="button" data-k="E">E</button><button type="button" data-k="R">R</button><button type="button" data-k="T">T</button><button type="button" data-k="Y">Y</button><button type="button" data-k="U">U</button><button type="button" data-k="I">I</button><button type="button" data-k="O">O</button><button type="button" data-k="P">P</button>
         <button type="button" data-k="A">A</button><button type="button" data-k="S">S</button><button type="button" data-k="D">D</button><button type="button" data-k="F">F</button><button type="button" data-k="G">G</button><button type="button" data-k="H">H</button><button type="button" data-k="J">J</button><button type="button" data-k="K">K</button><button type="button" data-k="L">L</button><button type="button" data-k="-">-</button>
         <button type="button" data-k="Z">Z</button><button type="button" data-k="X">X</button><button type="button" data-k="C">C</button><button type="button" data-k="V">V</button><button type="button" data-k="B">B</button><button type="button" data-k="N">N</button><button type="button" data-k="M">M</button><button type="button" data-k="." >.</button><button type="button" data-k="/">/</button><button type="button" data-k=" " >&#9251;</button>
-        <button type="button" class="acao l3" data-k="123">123</button><button type="button" class="acao l4" data-k="LIMPAR">Limpar</button><button type="button" class="acao l3" data-k="APAGAR">&#9003;</button>
+        <button type="button" class="acao l5" data-k="123">123</button><button type="button" class="acao l5" data-k="APAGAR" aria-label="Apagar">&#9003;</button>
       </div>
     </div>
     <button id="btn" type="submit">Buscar</button>
@@ -183,7 +183,6 @@
   }
   function apagar() { termoEl.value = novo ? '' : termoEl.value.slice(0, -1); novo = false; }
   termoEl.addEventListener('click', mostrarTeclado);
-  $('apagar').addEventListener('click', () => { apagar(); mostrarTeclado(); });
   // Limpar: zera tudo e volta ao começo (campo, resultado, foto e Brinco marcado)
   let geracao = 0;
   function limparTudo() {
@@ -654,7 +653,7 @@
   window.addEventListener('online', () => atualizar(false, true));
 
   // ---- atualização automática do app (troque APP_VERSAO e versao.json a cada mudança) ----
-  const APP_VERSAO = '13';
+  const APP_VERSAO = '14';
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
       const checar = () => reg.update().catch(() => {});
