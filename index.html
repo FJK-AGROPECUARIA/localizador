@@ -201,7 +201,8 @@
       }
       mostrarStatus();
     } catch (e) {
-      if (!silencioso || !base) mostrarStatus('Não consegui atualizar: ' + esc(e.message || e), true);
+      // com dados salvos, não mostra o erro: mantém a data da última atualização
+      if (!base) mostrarStatus('Não consegui atualizar: ' + esc(e.message || e), true);
       else mostrarStatus();
     } finally {
       atualizando = false; bt.disabled = false; bt.textContent = 'Atualizar dados';
@@ -221,6 +222,7 @@
       + '<div class="linha"><span>Fazenda</span><b>' + esc(a.fazenda) + '</b></div>'
       + '<div class="linha"><span>Módulo</span><b>' + esc(a.modulo) + '</b></div>'
       + '<div class="linha"><span>Área</span><b>' + esc(a.area) + '</b></div>'
+      + '<div class="linha"><span>Lote</span><b>' + esc(a.lote || '-') + '</b></div>'
       + '<div class="linha"><span>Data última pesagem</span><b>' + esc(a.dataPesagem) + '</b></div>'
       + '<div class="linha"><span>Peso atual</span><b>' + esc(a.peso) + '</b></div>'
       + '<div class="linha"><span>Peso projetado</span><b>' + esc(a.pesoProjetado) + '</b></div></div>';
@@ -228,8 +230,8 @@
   function deLinha(l) {
     return {
       fazenda: base.fazendas[l[0]] || '-', visual: ou(l[1]), eletronica: ou(l[2]), sexo: ou(l[3]), raca: ou(l[4]),
-      idade: fmtIdade(l[5]), categoria: ou(l[6]), situacao: ou(l[7]), modulo: ou(l[8]), area: l[9] || 'Sem área',
-      dataPesagem: ou(l[10]), peso: fmtPeso(l[11]), pesoProjetado: fmtPeso(l[12]),
+      idade: fmtIdade(l[5]), categoria: ou(l[6]), situacao: ou(l[7]), modulo: ou(l[8]), area: ou(l[9]),
+      dataPesagem: ou(l[10]), peso: fmtPeso(l[11]), pesoProjetado: fmtPeso(l[12]), lote: /^\s*sem lote\s*$/i.test(l[13] || '') ? '' : (l[13] || ''),
     };
   }
   function exibir(html) {
@@ -278,7 +280,31 @@
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') atualizar(false, true); });
   window.addEventListener('online', () => atualizar(false, true));
 
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  // ---- atualização automática do app (troque APP_VERSAO e versao.json a cada mudança) ----
+  const APP_VERSAO = '6';
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
+      const checar = () => reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checar(); });
+      setInterval(checar, 30 * 60000);
+    }).catch(() => {});
+    let recarregou = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (!recarregou) { recarregou = true; location.reload(); } });
+  }
+  async function checarVersao() {
+    if (navigator.onLine === false) return;
+    try {
+      const r = await fetch('versao.json?t=' + Date.now(), { cache: 'no-store' });
+      const v = String((await r.json()).versao || '');
+      let ja = ''; try { ja = sessionStorage.getItem('recarregadoPara') || ''; } catch (e) {}
+      if (v && v !== APP_VERSAO && ja !== v) {
+        try { sessionStorage.setItem('recarregadoPara', v); } catch (e) {}
+        location.reload();
+      }
+    } catch (e) {}
+  }
+  checarVersao();
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checarVersao(); });
 </script>
 </body>
 </html>
