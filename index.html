@@ -176,7 +176,7 @@
     const st = $('status');
     if (msg) { st.innerHTML = msg; st.className = 'status' + (erro ? ' erro' : ''); return; }
     if (!base) { st.innerHTML = 'Nenhum dado salvo no celular. Toque em <b>Atualizar dados</b> com internet.'; st.className = 'status erro'; return; }
-    st.innerHTML = 'Dados salvos de <b>' + fmtData(base.gerado) + '</b> · ' + base.linhas.length.toLocaleString('pt-BR') + ' animais'
+    st.innerHTML = 'Dados salvos de <b>' + fmtData(base.gerado) + '</b>'
       + (base.falhas && base.falhas.length ? '<br><small>Sem dados de: ' + esc(base.falhas.join(', ')) + '</small>' : '');
     st.className = 'status';
   }
