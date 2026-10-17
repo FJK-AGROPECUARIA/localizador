@@ -42,6 +42,11 @@
   .modo button.ativo { background:var(--verde); color:#fff; }
   .foto-topo { width:58px; flex:none; padding:0; height:52px; border-radius:12px; background:var(--lima); color:var(--verde); display:flex; align-items:center; justify-content:center; touch-action:manipulation; }
   .foto-topo svg { width:26px; height:26px; }
+  .opcoes { margin-top:16px; background:#fff; border:1px solid var(--borda); border-radius:12px; overflow:hidden; }
+  .opcoes .tit { padding:12px 14px; font-size:14px; color:var(--cinza); background:var(--verde2); border-left:5px solid var(--lima); }
+  .opcoes button { display:flex; justify-content:space-between; align-items:center; gap:10px; width:100%; background:#fff; color:var(--verde); border-top:1px solid var(--borda); border-radius:0; padding:14px; font-size:17px; text-align:left; }
+  .opcoes button small { color:var(--cinza); font-size:13px; font-weight:600; flex:none; }
+  .opcoes mark { background:var(--lima); color:var(--verde); border-radius:3px; padding:0 1px; }
   .acoes-campo { position:absolute; right:8px; top:50%; transform:translateY(-50%); display:flex; gap:6px; }
   .acoes-campo button { width:auto; padding:9px 12px; font-size:15px; border-radius:8px; background:var(--verde2); color:var(--verde); border:1px solid var(--lima); touch-action:manipulation; }
   .acoes-campo .icone { font-size:20px; padding:5px 0; width:44px; text-align:center; }
@@ -299,6 +304,16 @@
       dataPesagem: ou(l[10]), peso: fmtPeso(l[11]), pesoProjetado: fmtPeso(l[12]), lote: /^\s*sem lote\s*$/i.test(l[13] || '') ? '' : (l[13] || ''),
     };
   }
+  // lista de chips que contêm o número digitado (o trecho digitado aparece destacado)
+  function listaChips(ids, termo) {
+    const d = soNumeros(termo);
+    return '<div class="opcoes"><div class="tit">' + ids.length + ' chips contêm <b>' + esc(d) + '</b>. Toque no certo:</div>'
+      + ids.map(i => {
+        const l = base.linhas[i], chip = String(l[2] || ''), k = chip.indexOf(d);
+        const txt = k >= 0 ? esc(chip.slice(0, k)) + '<mark>' + esc(d) + '</mark>' + esc(chip.slice(k + d.length)) : esc(chip);
+        return '<button type="button" data-linha="' + i + '"><span>' + txt + '</span><small>Brinco ' + esc(ou(l[1])) + '</small></button>';
+      }).join('') + '</div>';
+  }
   function exibir(html) {
     if (fotoLida) { html = bannerFoto(fotoLida) + html; fotoLida = null; }
     $('res').innerHTML = html;
@@ -318,6 +333,7 @@
     // 1) busca nos dados salvos no celular (funciona sem internet)
     if (base) {
       const ids = buscarLocal(termo, modo);
+      if (ids.length > 1 && modo === 'chip') { exibir(listaChips(ids, termo)); return; }   // vários chips: deixa escolher
       if (ids.length) { exibir(ids.map(i => cartao(deLinha(base.linhas[i]))).join('')); return; }
       if (navigator.onLine === false) {
         exibir('<div class="msg">Nenhum animal com ' + nomeBusca + ' nos dados salvos de ' + fmtData(base.gerado) + '.<br>Atualize os dados quando tiver internet.</div>');
@@ -401,6 +417,8 @@
       + '</div></div>';
   }
   $('res').addEventListener('click', ev => {
+    const op = ev.target.closest('[data-linha]');
+    if (op) { const l = base.linhas[+op.dataset.linha]; exibir(cartao(deLinha(l))); return; }
     const bt = ev.target.closest('[data-outro]'); if (!bt) return;
     termoEl.value = bt.dataset.outro; novo = false; $('btn').click();
   });
@@ -433,7 +451,7 @@
   window.addEventListener('online', () => atualizar(false, true));
 
   // ---- atualização automática do app (troque APP_VERSAO e versao.json a cada mudança) ----
-  const APP_VERSAO = '9';
+  const APP_VERSAO = '10';
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
       const checar = () => reg.update().catch(() => {});
