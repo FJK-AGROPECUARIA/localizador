@@ -103,7 +103,7 @@
       <div class="campo-busca">
         <input id="termo" inputmode="none" placeholder="Nº do brinco. Ex.: 11491" autocomplete="off" autocorrect="off" spellcheck="false">
         <input type="file" id="fotoCamera" accept="image/*" capture="environment" hidden>
-        <input type="file" id="fotoGaleria" accept="image/jpeg,image/png,image/heic,image/heif,image/webp" hidden>
+        <input type="file" id="fotoGaleria" accept="image/*" hidden>
         <div class="acoes-campo">
           <button type="button" class="icone" id="apagar" aria-label="Apagar">&#9003;</button>
           <button type="button" class="icone" id="limpar" aria-label="Limpar">&#10005;</button>
@@ -355,7 +355,8 @@
   /* ---------- foto do brinco: lê o número da foto e busca sozinho ---------- */
   let fotoLida = null;
   const fundoMenu = $('fundoMenu');
-  $('foto').addEventListener('click', () => { $('tituloFoto').textContent = modo === 'chip' ? 'Foto do chip' : 'Foto do brinco'; fundoMenu.classList.remove('oculto'); });
+  // abre direto o menu do próprio celular (no iPhone: Fototeca, Tirar Foto, Escolher Arquivo)
+  $('foto').addEventListener('click', () => { const inp = $('fotoGaleria'); inp.value = ''; inp.click(); });
   fundoMenu.addEventListener('click', ev => {   // toque fora do menu também fecha
     const bt = ev.target.closest('[data-fonte]');
     if (!bt && ev.target !== fundoMenu) return;
@@ -432,7 +433,7 @@
   window.addEventListener('online', () => atualizar(false, true));
 
   // ---- atualização automática do app (troque APP_VERSAO e versao.json a cada mudança) ----
-  const APP_VERSAO = '8';
+  const APP_VERSAO = '9';
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
       const checar = () => reg.update().catch(() => {});
