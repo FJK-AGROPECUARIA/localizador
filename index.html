@@ -324,6 +324,8 @@
   // lista de chips que contêm o número digitado (o trecho digitado aparece destacado)
   function listaChips(ids, termo) {
     const d = soNumeros(termo);
+    // em ordem crescente do número do chip
+    ids = ids.slice().sort((x, y) => { const a = soNumeros(base.linhas[x][2]), b = soNumeros(base.linhas[y][2]); return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0); });
     return '<div class="opcoes"><div class="tit">' + ids.length + ' chips contêm <b>' + esc(d) + '</b>. Toque no certo:</div>'
       + ids.map(i => {
         const l = base.linhas[i], chip = String(l[2] || ''), k = chip.indexOf(d);
@@ -477,6 +479,38 @@
       if (sug.length) return { numero: numero, outros: sug.slice(0, 4) };
     }
     return { numero: numero, outros: nums.filter(v => v !== numero).slice(0, 3) };
+  }
+  // chip pela foto: só aceita quando tem certeza (senão pede para digitar)
+  //  - número com 8+ dígitos que existe num chip e foi lido pelo menos 2 vezes (o número aparece repetido no anel)
+  //  - ou 1 dígito diferente, mas confirmado por 3+ leituras e apontando para um só chip
+  function escolherChip(cands) {
+    const nada = { numero: '', outros: [] };
+    if (!base) return nada;
+    const cont = {};
+    cands.map(soNumeros).forEach(v => { if (v.length >= 8 && v.length <= 15 && !(idxBrinco[chaveBrinco(v)] || []).length) cont[v] = (cont[v] || 0) + 1; });
+    const leit = Object.keys(cont);
+    const chave = v => buscarLocal(v, 'chip').join(',');
+    // 1) exatos e confirmados
+    const exatos = leit.filter(v => chave(v) && (cont[v] >= 2 || v.length >= 10)).sort((a, b) => (cont[b] - cont[a]) || (b.length - a.length));
+    if (exatos.length) {
+      const k = chave(exatos[0]);
+      // se outra leitura bem confirmada aponta para outro chip, não tem certeza
+      if (exatos.some(v => chave(v) !== k && k.indexOf(chave(v)) < 0 && chave(v).indexOf(k) < 0 && cont[v] >= cont[exatos[0]] - 1)) return nada;
+      return { numero: exatos[0], outros: [] };
+    }
+    // 2) um dígito trocado, com várias leituras concordando
+    const apoio = {};
+    leit.forEach(v => chips.forEach(cp => {
+      const d = cp[0];
+      for (let i = 0; i + v.length <= d.length; i++) {
+        let dif = 0; for (let j = 0; j < v.length && dif < 2; j++) if (d[i + j] !== v[j]) dif++;
+        if (dif < 2) { const w = d.substr(i, v.length); apoio[w] = (apoio[w] || 0) + cont[v]; break; }
+      }
+    }));
+    const ord = Object.keys(apoio).filter(w => apoio[w] >= 3).sort((a, b) => apoio[b] - apoio[a]);
+    if (ord.length && buscarLocal(ord[0], 'chip').length === 1 && !(ord[1] && apoio[ord[1]] >= apoio[ord[0]] - 1 && chave(ord[1]) !== chave(ord[0])))
+      return { numero: ord[0], outros: [] };
+    return nada;
   }
   function bannerFoto(f, msg) {
     return '<div class="foto-lida"><img src="' + f.img + '" alt=""><div class="txt">'
@@ -801,31 +835,31 @@
     ocrPronto.catch(() => { ocrPronto = null; });
     return ocrPronto;
   }
-  function numerosDoTexto(t) {   // blocos de dígitos + blocos vizinhos juntos (ex.: "5633 0002")
+  function numerosDoTexto(t, repetidos) {   // blocos de dígitos + blocos vizinhos juntos (ex.: "5633 0002")
     const lista = [];
     String(t || '').split(/\n+/).forEach(linha => {
       const g = linha.match(/\d+/g) || [];
-      g.forEach((v, i) => { [v, g[i + 1] ? v + g[i + 1] : ''].forEach(x => { if (x.length >= 2 && lista.indexOf(x) < 0) lista.push(x); }); });
+      g.forEach((v, i) => { [v, g[i + 1] ? v + g[i + 1] : ''].forEach(x => { if (x.length >= 2 && (repetidos || lista.indexOf(x) < 0)) lista.push(x); }); });
     });
     return lista;
   }
-  async function ocrLocal(img, psm) {
+  async function ocrLocal(img, psm, repetidos) {
     const w = await Promise.race([carregarOCR(), new Promise((_, f) => setTimeout(() => f(new Error('demorou')), 25000))]);
     if (psm) await w.setParameters({ tessedit_pageseg_mode: psm });
-    try { const r = await w.recognize(img); return numerosDoTexto(r.data.text); }
+    try { const r = await w.recognize(img); return numerosDoTexto(r.data.text, repetidos); }
     finally { if (psm) await w.setParameters({ tessedit_pageseg_mode: '6' }); }
   }
   // chip: lê primeiro no celular; se não bater com nenhum chip e tiver internet, pede ao Google também
   let falhaLeitor = '';   // motivo da última falha (aparece na tela para ajudar a corrigir)
   async function lerNumerosChip(faixa) {
     let cands = [], f1 = '', f2 = '';
-    try { cands = await ocrLocal(faixa); } catch (e) { f1 = 'celular: ' + (e && e.message || e); }
-    const bate = l => l.some(v => v.length >= MIN_CHIP && buscarLocal(v, 'chip').length);
+    try { cands = await ocrLocal(faixa, null, true); } catch (e) { f1 = 'celular: ' + (e && e.message || e); }
+    const bate = l => !!escolherChip(l).numero;
     if (bate(cands) || navigator.onLine === false) { falhaLeitor = f1; return { candidatos: cands }; }
     try {
       const r = await lerFoto(faixa.split(',')[1]);
       if (r.erro) f2 = 'Google: ' + r.erro;
-      cands = (r.candidatos || []).concat(cands);
+      cands = (r.candidatos || []).concat(r.candidatos || [], cands);   // leitura do Google vale por 2
     } catch (e) { f2 = 'Google: ' + (e && e.message || e); }
     falhaLeitor = [f1, f2].filter(Boolean).join(' | ');
     return { candidatos: cands };
@@ -957,7 +991,7 @@
           let r = { candidatos: [] };
           try { r = await lerNumerosChip(await desenrolarChip(img, lista[n])); } catch (e) { falhaLeitor = String(e && e.message || e); }
           if (g !== geracao) return;
-          const e = escolherNumero(r.candidatos || [], 'chip');
+          const e = escolherChip(r.candidatos || []);
           if (achou(e.numero) || (!c.numero && e.numero)) c = e;
         }
       } else {
@@ -998,7 +1032,7 @@
   window.addEventListener('online', () => atualizar(false, true));
 
   // ---- atualização automática do app (troque APP_VERSAO e versao.json a cada mudança) ----
-  const APP_VERSAO = '17';
+  const APP_VERSAO = '18';
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
       const checar = () => reg.update().catch(() => {});

@@ -1,6 +1,6 @@
 // Guarda a página no celular para abrir mesmo sem internet.
 // Ao mudar a página, troque o número da versão abaixo.
-const VERSAO = 'localizador-v17';
+const VERSAO = 'localizador-v18';
 const OCR = 'localizador-ocr-v1';   // leitor de números offline (arquivos grandes, não mudam de versão)
 const ARQUIVOS = ['./', 'index.html', 'manifest.json', 'icone-192.png', 'icone-512.png'];
 const ehOCR = u => u.hostname === 'cdn.jsdelivr.net';   // leitor de números (versões fixas)
