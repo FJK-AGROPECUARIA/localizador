@@ -46,6 +46,13 @@
   .opcoes .tit { padding:12px 14px; font-size:14px; color:var(--cinza); background:var(--verde2); border-left:5px solid var(--lima); }
   .opcoes button { display:flex; justify-content:space-between; align-items:center; gap:10px; width:100%; background:#fff; color:var(--verde); border-top:1px solid var(--borda); border-radius:0; padding:14px; font-size:17px; text-align:left; }
   .opcoes button small { color:var(--cinza); font-size:13px; font-weight:600; flex:none; }
+  .marcar { margin-top:16px; background:#fff; border:1px solid var(--borda); border-radius:12px; overflow:hidden; }
+  .marcar .dica { padding:12px 14px; font-size:16px; color:var(--verde); background:var(--verde2); border-left:5px solid var(--lima); }
+  .marcar .area { position:relative; touch-action:manipulation; }
+  .marcar .area img { display:block; width:100%; height:auto; }
+  .marcar .area svg { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+  .marcar .botoes { display:flex; gap:8px; padding:10px; }
+  .marcar .botoes button { flex:1; font-size:16px; padding:12px; background:var(--verde2); color:var(--verde); border:1px solid var(--lima); }
   .opcoes mark { background:var(--lima); color:var(--verde); border-radius:3px; padding:0 1px; }
   .acoes-campo { position:absolute; right:8px; top:50%; transform:translateY(-50%); display:flex; gap:6px; }
   .acoes-campo button { width:auto; padding:9px 12px; font-size:15px; border-radius:8px; background:var(--verde2); color:var(--verde); border:1px solid var(--lima); touch-action:manipulation; }
@@ -398,8 +405,10 @@
   function escolherNumero(cands, m) {
     let nums = [];
     cands.map(soNumeros).forEach(v => { if (v && nums.indexOf(v) < 0) nums.push(v); });
-    if (m === 'chip') nums = nums.filter(v => v.length >= MIN_CHIP).sort((a, b) => b.length - a.length);
-    else nums = nums.filter(v => v.length <= 8).map(v => v.replace(/^0+(?=.)/, ''));
+    const ehBrinco = v => base && (idxBrinco[chaveBrinco(v)] || []).length > 0;
+    const ehChip = v => base && v.length >= MIN_CHIP && buscarLocal(v, 'chip').length > 0;
+    if (m === 'chip') nums = nums.filter(v => v.length >= MIN_CHIP && !ehBrinco(v)).sort((a, b) => b.length - a.length);
+    else nums = nums.filter(v => v.length <= 8).map(v => v.replace(/^0+(?=.)/, '')).filter(v => ehBrinco(v) || !ehChip(v));
     const chave = v => buscarLocal(v, m).join(',');
     const achados = [];
     nums.forEach(v => { if (achados.indexOf(v) < 0 && chave(v)) achados.push(v); });
@@ -423,21 +432,105 @@
     termoEl.value = bt.dataset.outro; novo = false; $('btn').click();
   });
   ['fotoCamera', 'fotoGaleria'].forEach(id => $(id).addEventListener('change', ev => processarFoto(ev.target.files && ev.target.files[0])));
+  // pede 2 toques na foto: centro e borda do chip redondo
+  function marcarChip(img) {
+    return new Promise(fim => {
+      const res = $('res');
+      res.innerHTML = '<div class="marcar"><div class="dica" id="dicaChip">1. Toque no <b>centro</b> do chip redondo</div>'
+        + '<div class="area" id="areaChip"><img src="' + img + '" alt=""><svg id="svgChip"></svg></div>'
+        + '<div class="botoes"><button type="button" id="refazerChip">Refazer</button><button type="button" id="cancelarChip">Cancelar</button></div></div>';
+      const area = $('areaChip'), im = area.querySelector('img'), svg = $('svgChip'), dica = $('dicaChip');
+      let centro = null, pronto = false;
+      const desenhar = (r) => {
+        const w = im.clientWidth, h = im.clientHeight; svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+        const k = w / im.naturalWidth;
+        svg.innerHTML = centro ? '<circle cx="' + centro.x * k + '" cy="' + centro.y * k + '" r="6" fill="#a7bc09" stroke="#11253d" stroke-width="2"/>'
+          + (r ? '<circle cx="' + centro.x * k + '" cy="' + centro.y * k + '" r="' + r * k + '" fill="none" stroke="#a7bc09" stroke-width="3"/>' : '') : '';
+      };
+      area.addEventListener('click', ev => {
+        if (pronto) return;
+        const b = im.getBoundingClientRect(), k = im.naturalWidth / b.width;
+        const p = { x: (ev.clientX - b.left) * k, y: (ev.clientY - b.top) * k };
+        if (!centro) { centro = p; desenhar(0); dica.innerHTML = '2. Agora toque na <b>borda</b> do chip (onde termina o redondo)'; return; }
+        const r = Math.hypot(p.x - centro.x, p.y - centro.y);
+        if (r < 8) return;
+        pronto = true; desenhar(r);
+        setTimeout(() => fim({ x: centro.x, y: centro.y, r: r }), 250);
+      });
+      $('refazerChip').addEventListener('click', () => { centro = null; pronto = false; desenhar(0); dica.innerHTML = '1. Toque no <b>centro</b> do chip redondo'; });
+      $('cancelarChip').addEventListener('click', () => fim(null));
+      res.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+  // "desenrola" o anel do chip numa faixa reta (o número fica em linha para o OCR ler)
+  function desenrolarChip(img, c) {
+    return new Promise((ok, falha) => {
+      const im = new Image();
+      im.onload = () => {
+        const W0 = im.naturalWidth, H0 = im.naturalHeight;
+        const cv = document.createElement('canvas'); cv.width = W0; cv.height = H0;
+        const cx0 = cv.getContext('2d'); cx0.drawImage(im, 0, 0);
+        const px = cx0.getImageData(0, 0, W0, H0).data;
+        const cinza = (x, y) => {   // tom de cinza com interpolação
+          if (x < 0 || y < 0 || x >= W0 - 1 || y >= H0 - 1) return 255;
+          const x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0;
+          const g = (xx, yy) => { const i = (yy * W0 + xx) * 4; return 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]; };
+          return (g(x0, y0) * (1 - fx) + g(x0 + 1, y0) * fx) * (1 - fy) + (g(x0, y0 + 1) * (1 - fx) + g(x0 + 1, y0 + 1) * fx) * fy;
+        };
+        const R = c.r, faixas = [[0.5, 1.0, false], [0.4, 0.9, false], [0.55, 1.05, false], [0.5, 1.0, true]];
+        const k = Math.max(1, 70 / (0.5 * R));            // altura mínima de 70 px por faixa
+        const H = Math.round(0.5 * R * k), W = Math.min(3000, Math.round(2 * Math.PI * 0.78 * R * k * 2));   // 2 voltas
+        const gap = 24, out = document.createElement('canvas');
+        out.width = W; out.height = faixas.length * (H + gap) + gap;
+        const ctx = out.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, out.width, out.height);
+        faixas.forEach((f, n) => {
+          const vals = new Float32Array(W * H);
+          for (let x = 0; x < W; x++) {
+            const a = (x / W) * 4 * Math.PI;
+            const sa = Math.sin(a), ca = Math.cos(a);
+            for (let y = 0; y < H; y++) {
+              const t = y / (H - 1), r = f[2] ? R * (f[0] + (f[1] - f[0]) * t) : R * (f[1] - (f[1] - f[0]) * t);
+              const sx = f[2] ? -sa : sa, sy = f[2] ? ca : -ca;
+              vals[y * W + x] = cinza(c.x + r * sx, c.y + r * sy);
+            }
+          }
+          const ord = Array.from(vals).sort((p, q) => p - q);
+          const lo = ord[Math.floor(ord.length * 0.02)], hi = ord[Math.floor(ord.length * 0.98)] || 255, d = Math.max(1, hi - lo);
+          const dados = ctx.createImageData(W, H);
+          for (let i = 0; i < vals.length; i++) {
+            const v = Math.max(0, Math.min(255, (vals[i] - lo) * 255 / d));
+            dados.data[i * 4] = dados.data[i * 4 + 1] = dados.data[i * 4 + 2] = v; dados.data[i * 4 + 3] = 255;
+          }
+          ctx.putImageData(dados, 0, gap + n * (H + gap));
+        });
+        ok(out.toDataURL('image/jpeg', 0.92));
+      };
+      im.onerror = () => falha(new Error('foto'));
+      im.src = img;
+    });
+  }
   async function processarFoto(arq) {
     if (!arq) return;
     teclado.classList.add('oculto');
     if (navigator.onLine === false) { exibir('<div class="msg erro">Ler o número pela foto precisa de internet. Digite o número no teclado.</div>'); return; }
     let img;
     try { img = await reduzirFoto(arq); } catch (e) { exibir('<div class="msg erro">Não consegui abrir a foto.</div>'); return; }
-    $('res').innerHTML = bannerFoto({ img: img }, modo === 'chip' ? 'Lendo o número do chip…' : 'Lendo o número do brinco…');
+    let envio = img;
+    const modoFoto = modo;
+    if (modoFoto === 'chip') {
+      const c = await marcarChip(img);
+      if (!c) { $('res').innerHTML = ''; return; }
+      try { envio = await desenrolarChip(img, c); } catch (e) { envio = img; }
+    }
+    $('res').innerHTML = bannerFoto({ img: img }, modoFoto === 'chip' ? 'Lendo o número do chip…' : 'Lendo o número do brinco…');
     $('foto').disabled = true;
     try {
-      const r = await lerFoto(img.split(',')[1]);
+      const r = await lerFoto(envio.split(',')[1]);
       if (r.erro) { exibir(bannerFoto({ img: img }, esc(r.erro)) ); return; }
-      const c = escolherNumero(r.candidatos || [], modo);
-      if (!c.numero) { exibir(bannerFoto({ img: img }, (modo === 'chip' ? 'Não encontrei o número do chip na foto.<br>' : 'Não encontrei o número do brinco na foto.<br>') + 'Tire mais perto, com o brinco reto e com boa luz.')); return; }
+      const c = escolherNumero(r.candidatos || [], modoFoto);
+      if (!c.numero) { exibir(bannerFoto({ img: img }, (modoFoto === 'chip' ? 'Não consegui ler o número do chip redondo.<br>Tente de novo marcando bem o centro e a borda do chip, ou digite o número.' : 'Não encontrei o número do brinco na foto.<br>Tire mais perto, com o brinco reto e com boa luz.'))); return; }
       termoEl.value = c.numero; novo = false;
-      fotoLida = { img: img, numero: c.numero, outros: c.outros, modo: modo };
+      fotoLida = { img: img, numero: c.numero, outros: c.outros, modo: modoFoto };
       $('btn').click();
     } catch (e) {
       exibir(bannerFoto({ img: img }, 'Sem conexão para ler a foto. ' + esc(e.message || e)));
@@ -451,7 +544,7 @@
   window.addEventListener('online', () => atualizar(false, true));
 
   // ---- atualização automática do app (troque APP_VERSAO e versao.json a cada mudança) ----
-  const APP_VERSAO = '10';
+  const APP_VERSAO = '11';
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
       const checar = () => reg.update().catch(() => {});
